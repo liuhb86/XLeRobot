@@ -176,33 +176,20 @@ class XLerobot2Wheels(Robot):
         self.bus1.connect()
         self.bus2.connect()
         
-        # Check if calibration file exists and ask user if they want to restore it
         if self.calibration_fpath.is_file():
-            logger.info(f"Calibration file found at {self.calibration_fpath}")
-            user_input = input(
-                f"Press ENTER to restore calibration from file, or type 'c' and press ENTER to run manual calibration: "
-            )
-            if user_input.strip().lower() != "c":
-                logger.info("Attempting to restore calibration from file...")
-                try:
-                    # Load calibration data into bus memory
-                    self.bus1.calibration = {k: v for k, v in self.calibration.items() if k in self.bus1.motors}
-                    self.bus2.calibration = {k: v for k, v in self.calibration.items() if k in self.bus2.motors}
-                    logger.info("Calibration data loaded into bus memory successfully!")
-                    
-                    # Write calibration data to motors
-                    self.bus1.write_calibration({k: v for k, v in self.calibration.items() if k in self.bus1.motors})
-                    self.bus2.write_calibration({k: v for k, v in self.calibration.items() if k in self.bus2.motors})
-                    logger.info("Calibration restored successfully from file!")
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to restore calibration from file: {e}")
-                    if calibrate:
-                        logger.info("Proceeding with manual calibration...")
-                        self.calibrate()
-            else:
-                logger.info("User chose manual calibration...")
+            logger.info(f"Loading calibration from {self.calibration_fpath}")
+            try:
+                bus1_calibration = {k: v for k, v in self.calibration.items() if k in self.bus1.motors}
+                bus2_calibration = {k: v for k, v in self.calibration.items() if k in self.bus2.motors}
+                self.bus1.calibration = bus1_calibration
+                self.bus2.calibration = bus2_calibration
+                self.bus1.write_calibration(bus1_calibration)
+                self.bus2.write_calibration(bus2_calibration)
+                logger.info("Calibration restored successfully from file.")
+            except Exception as e:
+                logger.warning(f"Failed to restore calibration from file: {e}")
                 if calibrate:
+                    logger.info("Proceeding with manual calibration...")
                     self.calibrate()
         elif calibrate:
             logger.info("No calibration file found, proceeding with manual calibration...")
@@ -420,7 +407,8 @@ class XLerobot2Wheels(Robot):
             right_wheel_degps = right_wheel_degps * scale
 
         # Convert each wheel's angular speed (deg/s) to a raw integer.
-        left_wheel_raw = self._degps_to_raw(left_wheel_degps)
+        # The left drive motor is mounted in the opposite orientation from the right one.
+        left_wheel_raw = self._degps_to_raw(-left_wheel_degps)
         right_wheel_raw = self._degps_to_raw(right_wheel_degps)
 
         return {
@@ -453,7 +441,8 @@ class XLerobot2Wheels(Robot):
             wheelbase = self.config.wheelbase
 
         # Convert each raw command back to an angular speed in deg/s.
-        left_degps = self._raw_to_degps(left_wheel_speed)
+        # Mirror the left-wheel sign flip used when sending commands.
+        left_degps = -self._raw_to_degps(left_wheel_speed)
         right_degps = self._raw_to_degps(right_wheel_speed)
 
         # Convert from deg/s to rad/s.

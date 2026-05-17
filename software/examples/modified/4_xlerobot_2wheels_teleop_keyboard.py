@@ -8,6 +8,7 @@ PYTHONPATH=src python -m lerobot.robots.xlerobot_2wheels.xlerobot_2wheels_host -
 PYTHONPATH=src python -m examples.xlerobot_2wheels.teleoperate_Keyboard
 '''
 
+import argparse
 import time
 import numpy as np
 import math
@@ -17,13 +18,15 @@ from lerobot.robots.xlerobot_2wheels import XLerobot2WheelsClient, XLerobot2Whee
 from lerobot.utils.robot_utils import precise_sleep
 from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
 from lerobot.model.SO101Robot import SO101Kinematics
-from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop, KeyboardTeleopConfig
+from termios_keyboard import TermiosKeyboard
 
 # Base speed control parameters - adjustable slopes
 BASE_ACCELERATION_RATE = 10.0  # acceleration slope (speed/second)
 BASE_DECELERATION_RATE = 10  # deceleration slope (speed/second) - very slow for noticeable deceleration
-BASE_MAX_SPEED = 6.0          # maximum speed multiplier
+BASE_TOP_SPEED_LEVELS = [2.0, 4.0, 6.0]  # maximum speed multiplier per speed level
 MIN_VELOCITY_THRESHOLD = 0.02 # minimum velocity to send to motors during deceleration
+BASE_KEY_HOLD_SECONDS = 0.05
+BASE_BRAKE_KEY = " "
 
 # Keymaps (semantic action: key) - Updated for differential drive
 LEFT_KEYMAP = {
@@ -182,7 +185,7 @@ class SimpleTeleopArm:
         self.joint_map = joint_map
         self.prefix = prefix  # To distinguish left and right arm
         self.kp = kp
-        # Initial joint positions
+        # Initial joint positions, recorded so quit can return the arms to their startup pose.
         self.joint_positions = {
             "shoulder_pan": initial_obs[f"{prefix}_arm_shoulder_pan.pos"],
             "shoulder_lift": initial_obs[f"{prefix}_arm_shoulder_lift.pos"],
@@ -194,19 +197,17 @@ class SimpleTeleopArm:
         # Set initial x/y to fixed values
         self.current_x = 0.1629
         self.current_y = 0.1131
-        self.pitch = 0.0
+        self.start_pitch = (
+            self.joint_positions["wrist_flex"]
+            + self.joint_positions["shoulder_lift"]
+            + self.joint_positions["elbow_flex"]
+        )
+        self.pitch = self.start_pitch
         # Set the degree step and xy step
         self.degree_step = 3
         self.xy_step = 0.0081
-        # Set target positions to zero for P control
-        self.target_positions = {
-            "shoulder_pan": 0.0,
-            "shoulder_lift": 0.0,
-            "elbow_flex": 0.0,
-            "wrist_flex": 0.0,
-            "wrist_roll": 0.0,
-            "gripper": 0.0,
-        }
+        # Start with targets at the observed positions so teleop does not move the arms on startup.
+        self.target_positions = self.joint_positions.copy()
         self.zero_pos = {
             'shoulder_pan': 0.0,
             'shoulder_lift': 0.0,
@@ -238,7 +239,14 @@ class SimpleTeleopArm:
         action = self.p_control_action(robot)
         robot.send_action(action)
 
-    def execute_rectangular_trajectory(self, robot, fps=30):
+    def move_to_recorded_start_position(self, robot):
+        print(f"[{self.prefix}] Returning to recorded startup position: {self.joint_positions} ......")
+        self.target_positions = self.joint_positions.copy()
+        self.pitch = self.start_pitch
+        action = self.p_control_action(robot)
+        robot.send_action(action)
+
+    def execute_rectangular_trajectory(self, robot, fps=30, log_rerun=False):
         """
         Execute a blocking rectangular trajectory on the x-y plane.
         
@@ -305,7 +313,8 @@ class SimpleTeleopArm:
                 
                 # Get observation and log data
                 obs = robot.get_observation()
-                log_rerun_data(obs, robot_action)
+                if log_rerun:
+                    log_rerun_data(obs, robot_action)
                 
             except Exception as e:
                 print(f"[{self.prefix}] IK failed at x={self.current_x:.4f}, y={self.current_y:.4f}: {e}")
@@ -394,21 +403,67 @@ class SmoothBaseController:
         self.last_time = time.time()
         self.last_direction = {"x.vel": 0.0, "theta.vel": 0.0}
         self.is_moving = False
+        self.active_base_keys = {}
+
+    def max_speed_multiplier(self, robot):
+        level_index = min(robot.speed_index, len(BASE_TOP_SPEED_LEVELS) - 1)
+        return BASE_TOP_SPEED_LEVELS[level_index]
     
     def update(self, pressed_keys, robot):
         """Update smooth control and return base action"""
         current_time = time.time()
         dt = current_time - self.last_time
         self.last_time = current_time
-        
-        # Check if any base keys are pressed
+
+        if robot.teleop_keys["speed_up"] in pressed_keys:
+            previous_speed_index = robot.speed_index
+            robot.speed_index = min(robot.speed_index + 1, len(robot.speed_levels) - 1)
+            if robot.speed_index != previous_speed_index:
+                print(
+                    f"[BASE] Speed level increased to {robot.speed_index + 1}/{len(robot.speed_levels)} "
+                    f"(top multiplier {self.max_speed_multiplier(robot):.1f}x)"
+                )
+
+        if robot.teleop_keys["speed_down"] in pressed_keys:
+            previous_speed_index = robot.speed_index
+            robot.speed_index = max(robot.speed_index - 1, 0)
+            if robot.speed_index != previous_speed_index:
+                print(
+                    f"[BASE] Speed level decreased to {robot.speed_index + 1}/{len(robot.speed_levels)} "
+                    f"(top multiplier {self.max_speed_multiplier(robot):.1f}x)"
+                )
+
+        max_speed_multiplier = self.max_speed_multiplier(robot)
+        self.current_speed = min(self.current_speed, max_speed_multiplier)
+
+        if BASE_BRAKE_KEY in pressed_keys:
+            self.active_base_keys.clear()
+            self.current_speed = 0.0
+            self.last_direction = {"x.vel": 0.0, "theta.vel": 0.0}
+            self.is_moving = False
+            print("[BASE] Brake")
+            return {"x.vel": 0.0, "theta.vel": 0.0}
+
+        speed_setting = robot.speed_levels[robot.speed_index]
+        linear_speed = speed_setting["linear"]
+        angular_speed = speed_setting["angular"]
+
+        # Check if any base keys are pressed. Terminal input reports repeated characters,
+        # not key-up/key-down state, so keep each base key active briefly after seeing it.
         base_keys = [
             robot.teleop_keys['forward'],
             robot.teleop_keys['backward'], 
             robot.teleop_keys['rotate_left'],
             robot.teleop_keys['rotate_right']
         ]
-        any_key_pressed = any(key in pressed_keys for key in base_keys)
+        for key in base_keys:
+            if key in pressed_keys:
+                self.active_base_keys[key] = current_time + BASE_KEY_HOLD_SECONDS
+            elif self.active_base_keys.get(key, 0.0) <= current_time:
+                self.active_base_keys.pop(key, None)
+
+        active_base_keys = set(self.active_base_keys)
+        any_key_pressed = bool(active_base_keys)
         
         # Calculate base action directly (bypass robot's built-in speed control)
         base_action = {"x.vel": 0.0, "theta.vel": 0.0}
@@ -419,19 +474,14 @@ class SmoothBaseController:
                 self.is_moving = True
                 print("[BASE] Starting acceleration")
             
-            # Get current speed level from robot
-            speed_setting = robot.speed_levels[robot.speed_index]
-            linear_speed = speed_setting["linear"]  # e.g. 0.1, 0.2, or 0.3
-            angular_speed = speed_setting["angular"]  # e.g. 30, 60, or 90
-            
             # Calculate direction based on pressed keys
-            if robot.teleop_keys["forward"] in pressed_keys:
+            if robot.teleop_keys["forward"] in active_base_keys:
                 base_action["x.vel"] += linear_speed
-            if robot.teleop_keys["backward"] in pressed_keys:
+            if robot.teleop_keys["backward"] in active_base_keys:
                 base_action["x.vel"] -= linear_speed
-            if robot.teleop_keys["rotate_left"] in pressed_keys:
+            if robot.teleop_keys["rotate_left"] in active_base_keys:
                 base_action["theta.vel"] += angular_speed
-            if robot.teleop_keys["rotate_right"] in pressed_keys:
+            if robot.teleop_keys["rotate_right"] in active_base_keys:
                 base_action["theta.vel"] -= angular_speed
             
             # Store current direction for deceleration
@@ -439,7 +489,7 @@ class SmoothBaseController:
             
             # Accelerate
             self.current_speed += BASE_ACCELERATION_RATE * dt
-            self.current_speed = min(self.current_speed, BASE_MAX_SPEED)
+            self.current_speed = min(self.current_speed, max_speed_multiplier)
                 
         else:
             # No keys pressed - decelerate
@@ -469,11 +519,12 @@ class SmoothBaseController:
         
         # Debug output
         if any_key_pressed:
-            print(f"[BASE] ACCEL: Speed={self.current_speed:.2f}, Action={base_action}")
+            print(f"[BASE] ACCEL: Speed={self.current_speed:.2f}/{max_speed_multiplier:.1f}, Action={base_action}")
         elif self.current_speed > 0.01:
             print(f"[BASE] DECEL: Speed={self.current_speed:.2f}, Action={base_action}")
         elif self.current_speed <= 0.01:
-            print(f"[BASE] STOPPED: Speed={self.current_speed:.2f}")
+            # print(f"[BASE] STOPPED: Speed={self.current_speed:.2f}")
+            pass
         
         return base_action
 
@@ -482,7 +533,39 @@ class SmoothBaseController:
 smooth_controller = SmoothBaseController()
 
 
+def return_arms_to_recorded_start(left_arm, right_arm, robot, duration_s=2.0, fps=50, log_rerun=False):
+    print("[MAIN] Returning arms to recorded startup positions before quit.")
+    left_arm.target_positions = left_arm.joint_positions.copy()
+    right_arm.target_positions = right_arm.joint_positions.copy()
+    left_arm.pitch = left_arm.start_pitch
+    right_arm.pitch = right_arm.start_pitch
+
+    deadline = time.time() + duration_s
+    while time.time() < deadline:
+        left_action = left_arm.p_control_action(robot)
+        right_action = right_arm.p_control_action(robot)
+        action = {**left_action, **right_action, "x.vel": 0.0, "theta.vel": 0.0}
+        robot.send_action(action)
+        obs = robot.get_observation()
+        if log_rerun:
+            log_rerun_data(obs, action)
+        precise_sleep(1.0 / fps)
+
+
 def main():
+    parser = argparse.ArgumentParser(description="XLeRobot 2Wheels keyboard teleoperation")
+    parser.add_argument(
+        "--recalibrate",
+        action="store_true",
+        help="Run manual calibration after connecting instead of only using saved calibration.",
+    )
+    parser.add_argument(
+        "--log-rerun-data",
+        action="store_true",
+        help="Enable Rerun visualization logging for observations and actions.",
+    )
+    args = parser.parse_args()
+
     # Teleop parameters
     FPS = 50
     # ip = "192.168.1.123"  # This is for zmq connection
@@ -499,7 +582,10 @@ def main():
     robot = XLerobot2Wheels(robot_config)
     
     try:
-        robot.connect()
+        robot.connect(calibrate=not args.recalibrate)
+        if args.recalibrate:
+            print("[MAIN] Recalibration requested with --recalibrate.")
+            robot.calibrate()
         print(f"[MAIN] Successfully connected to robot")
     except Exception as e:
         print(f"[MAIN] Failed to connect to robot: {e}")
@@ -507,11 +593,11 @@ def main():
         print(robot)
         return
         
-    init_rerun(session_name="xlerobot_2wheels_teleop")
+    if args.log_rerun_data:
+        init_rerun(session_name="xlerobot_2wheels_teleop")
 
     #Init the keyboard instance
-    keyboard_config = KeyboardTeleopConfig()
-    keyboard = KeyboardTeleop(keyboard_config)
+    keyboard = TermiosKeyboard()
     keyboard.connect()
 
     # Init the arm and head instances
@@ -522,9 +608,7 @@ def main():
     right_arm = SimpleTeleopArm(kin_right, RIGHT_JOINT_MAP, obs, prefix="right")
     head_control = SimpleHeadControl(obs)
 
-    # Move both arms and head to zero position at start
-    left_arm.move_to_zero_position(robot)
-    right_arm.move_to_zero_position(robot)
+    print("[MAIN] Recorded startup arm positions. Arms will return there before quit.")
 
     # Print comprehensive keymap information based on robot config
     print("\n" + "="*80)
@@ -538,6 +622,7 @@ def main():
     print(f"    {robot.teleop_keys['rotate_right']}: Rotate Right")
     print(f"    {robot.teleop_keys['speed_up']}: Speed Up")
     print(f"    {robot.teleop_keys['speed_down']}: Speed Down")
+    print("    Space: Brake")
     print(f"    {robot.teleop_keys['quit']}: Quit")
     print("    🚀 Smooth Control: Linear acceleration when holding, linear deceleration when released")
     
@@ -577,12 +662,16 @@ def main():
     print(f"   Wheelbase: {robot.config.wheelbase:.3f}m")
     print(f"   Speed Levels: {len(robot.speed_levels)} levels")
     for i, level in enumerate(robot.speed_levels):
-        print(f"      Level {i+1}: Linear {level['linear']:.1f}m/s, Angular {level['angular']:.0f}°/s")
+        top_speed = BASE_TOP_SPEED_LEVELS[min(i, len(BASE_TOP_SPEED_LEVELS) - 1)]
+        print(
+            f"      Level {i+1}: Linear {level['linear']:.1f}m/s, "
+            f"Angular {level['angular']:.0f}°/s, Top Multiplier {top_speed:.1f}x"
+        )
     
     print(f"\n🚀 Smooth Control Parameters:")
     print(f"   Acceleration Rate: {BASE_ACCELERATION_RATE:.1f} speed/second")
     print(f"   Deceleration Rate: {BASE_DECELERATION_RATE:.1f} speed/second")
-    print(f"   Max Speed Multiplier: {BASE_MAX_SPEED:.1f}x")
+    print(f"   Top Speed Multipliers: {', '.join(f'{level:.1f}x' for level in BASE_TOP_SPEED_LEVELS)}")
     
     print("\n" + "="*80)
     print("🎮 Control started! Use above keys to control robot")
@@ -591,19 +680,33 @@ def main():
     try:
         while True:
             pressed_keys = set(keyboard.get_action().keys())
+
+            if robot.teleop_keys["quit"] in pressed_keys:
+                print("[MAIN] Quit key pressed. Stopping base.")
+                robot.send_action({"x.vel": 0.0, "theta.vel": 0.0})
+                return_arms_to_recorded_start(
+                    left_arm,
+                    right_arm,
+                    robot,
+                    duration_s=2.0,
+                    fps=FPS,
+                    log_rerun=args.log_rerun_data,
+                )
+                break
+
             left_key_state = {action: (key in pressed_keys) for action, key in LEFT_KEYMAP.items()}
             right_key_state = {action: (key in pressed_keys) for action, key in RIGHT_KEYMAP.items()}
 
             # Handle rectangular trajectory for left arm (y key)
             if left_key_state.get('triangle'):
                 print("[MAIN] Left arm rectangular trajectory triggered!")
-                left_arm.execute_rectangular_trajectory(robot, fps=FPS)
+                left_arm.execute_rectangular_trajectory(robot, fps=FPS, log_rerun=args.log_rerun_data)
                 continue
 
             # Handle rectangular trajectory for right arm (Y key)  
             if right_key_state.get('triangle'):
                 print("[MAIN] Right arm rectangular trajectory triggered!")
-                right_arm.execute_rectangular_trajectory(robot, fps=FPS)
+                right_arm.execute_rectangular_trajectory(robot, fps=FPS, log_rerun=args.log_rerun_data)
                 continue
 
             # Handle reset for left arm
@@ -637,8 +740,9 @@ def main():
 
             obs = robot.get_observation()
             # print(f"[MAIN] Observation: {obs}")
-            log_rerun_data(obs, action)
-            # busy_wait(1.0 / FPS)
+            if args.log_rerun_data:
+                log_rerun_data(obs, action)
+            precise_sleep(1.0 / FPS)
     finally:
         robot.disconnect()
         keyboard.disconnect()

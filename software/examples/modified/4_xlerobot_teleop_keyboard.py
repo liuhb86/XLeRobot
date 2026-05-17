@@ -18,11 +18,8 @@ from lerobot.robots.xlerobot import XLerobotConfig, XLerobot
 from lerobot.utils.robot_utils import precise_sleep
 from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
 from lerobot.model.SO101Robot import SO101Kinematics
-# from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop, KeyboardTeleopConfig
 
-        
-from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop
-from lerobot.teleoperators.keyboard.configuration_keyboard import KeyboardTeleopConfig
+from termios_keyboard import TermiosKeyboard
 
 # Keymaps (semantic action: key)
 LEFT_KEYMAP = {
@@ -412,8 +409,7 @@ def main():
     init_rerun(session_name="xlerobot_teleop_v2")
 
     #Init the keyboard instance
-    keyboard_config = KeyboardTeleopConfig()
-    keyboard = KeyboardTeleop(keyboard_config)
+    keyboard = TermiosKeyboard()
     keyboard.connect()
 
     # Init the arm and head instances

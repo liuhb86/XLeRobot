@@ -5,11 +5,15 @@ Fixed action format conversion issues
 Uses P control, keyboard only changes target joint angles
 """
 
+import argparse
+import json
 import logging
 import math
+import os
 import time
 import traceback
 from joyconrobotics import JoyconRobotics
+from joyconrobotics.device import get_L_id, get_R_id
 
 
 # Set up logging
@@ -26,6 +30,32 @@ JOINT_CALIBRATION = [
     ["wrist_roll", 0.0, 0.5],  # Joint 5: zero position offset, scale factor
     ["gripper", 0.0, 1.0],  # Joint 6: zero position offset, scale factor
 ]
+
+
+def find_joycon_id(device):
+    if device == "right":
+        return get_R_id()
+    return get_L_id()
+
+
+def has_joycon_id(joycon_id):
+    return joycon_id is not None and all(value is not None for value in joycon_id)
+
+
+def check_joycon_available(device):
+    joycon_id = find_joycon_id(device)
+    if has_joycon_id(joycon_id):
+        return
+
+    other_device = "left" if device == "right" else "right"
+    other_joycon_id = find_joycon_id(other_device)
+    if has_joycon_id(other_joycon_id):
+        raise RuntimeError(
+            f"No usable {device} Joy-Con found. A {other_device} Joy-Con is available; "
+            f"run again with --joycon-device {other_device}."
+        )
+    raise RuntimeError("No usable Joy-Con found. Pair/connect a Joy-Con, then run this script again.")
+
 
 class FixedAxesJoyconRobotics(JoyconRobotics):
     def common_update(self):
@@ -433,8 +463,22 @@ def p_control_loop(
 
 def main():
     """Main function"""
-    print("LeRobot Simplified Keyboard Control Example (P Control)")
+    parser = argparse.ArgumentParser(description="LeRobot Simplified Joy-Con Control Example (EE Control)")
+    parser.add_argument("--arm", type=str, default="left", help="Arm to control (e.g.: left, right)")
+    parser.add_argument(
+        "--joycon-device",
+        choices=("left", "right"),
+        default="right",
+        help="Joy-Con side to use for EE control. Defaults to right.",
+    )
+    args = parser.parse_args()
+
+    print("LeRobot Simplified Joy-Con Control Example (P Control)")
     print("=" * 50)
+
+    robot = None
+    keyboard = None
+    joyconrobotics = None
 
     try:
         # Import necessary modules
@@ -442,37 +486,40 @@ def main():
 
         from lerobot.robots.so_follower.so_follower import SO100Follower
         from lerobot.robots.so_follower.config_so_follower import SO100FollowerConfig
-        # from lerobot.teleoperators.keyboard import KeyboardTeleop, KeyboardTeleopConfig
 
-        from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop
-        from lerobot.teleoperators.keyboard.configuration_keyboard import KeyboardTeleopConfig
+        from termios_keyboard import TermiosKeyboard
 
-        # Get port
-        port = input("Please enter the USB port for SO100 robot (e.g., /dev/ttyACM0): ").strip()
+        # Get arm configuration from xlerobot.json
+        config_path = os.path.join(os.path.dirname(__file__), "xlerobot.json")
+        with open(config_path, "r") as f:
+            config = json.load(f)
 
-        # If directly press Enter, use default port
-        if not port:
-            port = "/dev/ttyACM0"
-            print(f"Using default port: {port}")
-        else:
-            print(f"Connecting to port: {port}")
+        if args.arm not in config:
+            raise ValueError(f"Arm '{args.arm}' not found in {config_path}. Available: {list(config.keys())}")
+
+        arm_config = config[args.arm]
+        port = arm_config["port"]
+        robot_id = arm_config["robot-id"]
+        print(f"Selected arm: {args.arm}, Connecting to port: {port}, robot_id: {robot_id}")
+
+        check_joycon_available(args.joycon_device)
+
+        # Initialize Joy-Con before connecting the robot so missing controller errors fail early.
+        joyconrobotics = FixedAxesJoyconRobotics(
+            args.joycon_device,
+            dof_speed=[2, 2, 2, 1, 1, 1]
+        )
 
         # Configure robot
-        robot_config = SO100FollowerConfig(port=port)
+        robot_config = SO100FollowerConfig(port=port, id=robot_id)
         robot = SO100Follower(robot_config)
 
         # Configure keyboard
-        keyboard_config = KeyboardTeleopConfig()
-        keyboard = KeyboardTeleop(keyboard_config)
+        keyboard = TermiosKeyboard()
 
         # Connect devices
         robot.connect()
         keyboard.connect()
-        # 使用修改后的控制类
-        joyconrobotics_right = FixedAxesJoyconRobotics(
-            "right",
-            dof_speed=[2, 2, 2, 1, 1, 1]
-        )
 
         print("固定轴向控制测试:")
         print("垂直摇杆: 只控制X轴（前后）")  
@@ -546,12 +593,10 @@ def main():
 
         # Start P control loop
         p_control_loop(
-            robot, keyboard, target_positions, start_positions, current_x, current_y, joyconrobotics_right, kp=0.5, control_freq=50
+            robot, keyboard, target_positions, start_positions, current_x, current_y, joyconrobotics, kp=0.5, control_freq=50
         )
 
         # Disconnect
-        robot.disconnect()
-        keyboard.disconnect()
         print("Program ended")
 
     except Exception as e:
@@ -562,6 +607,13 @@ def main():
         print("2. Whether the USB port is correct")
         print("3. Whether you have sufficient permissions to access USB devices")
         print("4. Whether the robot is properly configured")
+    finally:
+        if joyconrobotics is not None:
+            joyconrobotics.disconnect()
+        if keyboard is not None and keyboard.old_settings is not None:
+            keyboard.disconnect()
+        if robot is not None and robot.is_connected:
+            robot.disconnect()
 
 
 if __name__ == "__main__":

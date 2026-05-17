@@ -441,13 +441,10 @@ def main():
     try:
         # Import necessary modules
         # from lerobot.robots.so100_follower import SO100Follower, SO100FollowerConfig
-
         from lerobot.robots.so_follower.so_follower import SO100Follower
         from lerobot.robots.so_follower.config_so_follower import SO100FollowerConfig
-        # from lerobot.teleoperators.keyboard import KeyboardTeleop, KeyboardTeleopConfig
 
-        from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop
-        from lerobot.teleoperators.keyboard.configuration_keyboard import KeyboardTeleopConfig
+        from termios_keyboard import TermiosKeyboard
         
         # Get port
         port = input("Please enter SO100 robot USB port (e.g.: /dev/ttyACM0): ").strip()
@@ -464,8 +461,7 @@ def main():
         robot = SO100Follower(robot_config)
         
         # Configure keyboard
-        keyboard_config = KeyboardTeleopConfig()
-        keyboard = KeyboardTeleop(keyboard_config)
+        keyboard = TermiosKeyboard()
         
         # Connect devices
         robot.connect()

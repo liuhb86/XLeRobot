@@ -1,0 +1,50 @@
+================================================================================
+🤖 XLeRobot 2Wheels Joy-Con Control Instructions
+================================================================================
+
+📱 Base Control (Differential Drive):
+    Left joystick up/down: Forward/backward
+    Left joystick left/right: Rotate left/right
+    Left SL: Speed down
+    Right SR: Speed up
+    🚀 Smooth Control: Linear acceleration when holding, linear deceleration when released
+
+🦾 Right Arm Control:
+   Position Control:
+    - Y/A: Y-axis left/right
+    - X/B: Servo 2 forward/backward
+    - R/Plus: Servo 3 up/down
+   Gyro Control:
+    - Joy-Con pitch/tilt controls wrist flex, keeping the wrist angle aligned with the arm pose
+    - Joy-Con roll/rotation controls wrist roll relative to the startup Joy-Con orientation
+   Gripper Control:
+    - ZR Button: Hold to toggle open/close direction, continue holding for linear open/close
+
+🦾 Left Arm Control:
+   Position Control:
+    - D-pad left/right: Y-axis left/right
+    - D-pad up/down: Servo 2 forward/backward
+    - L/Minus: Servo 3 up/down
+   Gyro Control:
+    - Joy-Con pitch/tilt controls wrist flex, keeping the wrist angle aligned with the arm pose
+    - Joy-Con roll/rotation controls wrist roll relative to the startup Joy-Con orientation
+   Gripper Control:
+    - ZL Button: Hold to toggle open/close direction, continue holding for linear open/close
+
+👁️ Head Control:
+   Right Joy-Con joystick:
+    - Up/Down: Tilt the head down/up (Head Motor 2)
+    - Left/Right: Pan the head left/right with smaller steps (Head Motor 1)
+
+⚙️ Robot Configuration:
+   Wheel Radius: 0.050m
+   Wheelbase: 0.250m
+   Speed Levels: 3 levels
+      Level 1: Linear 0.1m/s, Angular 30°/s, Top Multiplier 2.0x
+      Level 2: Linear 0.2m/s, Angular 60°/s, Top Multiplier 4.0x
+      Level 3: Linear 0.3m/s, Angular 90°/s, Top Multiplier 6.0x
+
+🚀 Smooth Control Parameters:
+   Acceleration Rate: 10.0 speed/second
+   Deceleration Rate: 10.0 speed/second
+   Top Speed Multipliers: 2.0x, 4.0x, 6.0x

@@ -1,0 +1,10 @@
+{
+    "left": {
+        "port": "/dev/ttyACM0",
+        "robot-id": "xlerobot_left"
+    },
+    "right": {
+        "port": "/dev/ttyACM1",
+        "robot-id": "xlerobot_right"
+    }
+}

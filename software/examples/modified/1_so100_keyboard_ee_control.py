@@ -5,10 +5,13 @@ Fixed action format conversion issues
 Uses P control, keyboard only changes target joint angles
 """
 
+import argparse
 import time
 import logging
 import traceback
 import math
+import json
+import os
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -379,57 +382,46 @@ def p_control_loop(robot, keyboard, target_positions, start_positions, current_x
 
 def main():
     """Main function"""
+    parser = argparse.ArgumentParser(description="LeRobot Simplified Keyboard Control Example (EE Control)")
+    parser.add_argument("--arm", type=str, default="left", help="Arm to control (e.g.: left, right)")
+    args = parser.parse_args()
+
     print("LeRobot Simplified Keyboard Control Example (P Control)")
     print("="*50)
     
     try:
         # Import necessary modules
         # from lerobot.robots.so100_follower import SO100Follower, SO100FollowerConfig
-        # from lerobot.teleoperators.keyboard import KeyboardTeleop, KeyboardTeleopConfig
-
         from lerobot.robots.so_follower.so_follower import SO100Follower
         from lerobot.robots.so_follower.config_so_follower import SO100FollowerConfig
         
-        from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop
-        from lerobot.teleoperators.keyboard.configuration_keyboard import KeyboardTeleopConfig
+        from termios_keyboard import TermiosKeyboard
         
-        # Get port
-        port = input("Please enter the USB port for SO100 robot (e.g., /dev/ttyACM0): ").strip()
+        # Get arm configuration from xlerobot.json
+        config_path = os.path.join(os.path.dirname(__file__), "xlerobot.json")
+        with open(config_path, "r") as f:
+            config = json.load(f)
         
-        # If directly press Enter, use default port
-        if not port:
-            port = "/dev/ttyACM0"
-            print(f"Using default port: {port}")
-        else:
-            print(f"Connecting to port: {port}")
+        if args.arm not in config:
+            raise ValueError(f"Arm '{args.arm}' not found in {config_path}. Available: {list(config.keys())}")
+        
+        arm_config = config[args.arm]
+        port = arm_config["port"]
+        robot_id = arm_config["robot-id"]
+        print(f"Selected arm: {args.arm}, Connecting to port: {port}, robot_id: {robot_id}")
         
         # Configure robot
-        robot_config = SO100FollowerConfig(port=port)
+        robot_config = SO100FollowerConfig(port=port, id=robot_id)
         robot = SO100Follower(robot_config)
         
         # Configure keyboard
-        keyboard_config = KeyboardTeleopConfig()
-        keyboard = KeyboardTeleop(keyboard_config)
+        keyboard = TermiosKeyboard()
         
         # Connect devices
         robot.connect()
         keyboard.connect()
         
         print("Device connection successful!")
-        
-        # Ask whether to recalibrate
-        while True:
-            calibrate_choice = input("Do you want to recalibrate the robot? (y/n): ").strip().lower()
-            if calibrate_choice in ['y', 'yes']:
-                print("Starting recalibration...")
-                robot.calibrate()
-                print("Calibration completed!")
-                break
-            elif calibrate_choice in ['n', 'no']:
-                print("Using previous calibration file")
-                break
-            else:
-                print("Please enter y or n")
         
         # Read initial joint angles
         print("Reading initial joint angles...")
@@ -493,4 +485,4 @@ def main():
         print("4. Whether the robot is properly configured")
 
 if __name__ == "__main__":
-    main() 
+    main()

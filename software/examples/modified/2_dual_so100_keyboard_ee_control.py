@@ -11,6 +11,8 @@ import time
 import logging
 import traceback
 import math
+import json
+import os
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -288,20 +290,20 @@ def p_control_loop(robots, keyboard, target_positions, start_positions, current_
                     
                     # First arm control mapping: 7y8u9i0o-p=[
                     arm1_joint_controls = {
-                        '7': ('shoulder_pan', -1),    # Joint1 decrease
-                        'y': ('shoulder_pan', 1),     # Joint1 increase
-                        '0': ('wrist_roll', -1),      # Joint5 decrease
-                        'o': ('wrist_roll', 1),       # Joint5 increase
-                        '-': ('gripper', -1),         # Joint6 decrease
-                        'p': ('gripper', 1),          # Joint6 increase
+                        '1': ('shoulder_pan', -1),    # Joint1 decrease
+                        'q': ('shoulder_pan', 1),     # Joint1 increase
+                        '5': ('wrist_roll', -1),      # Joint5 decrease
+                        't': ('wrist_roll', 1),       # Joint5 increase
+                        '6': ('gripper', -1),         # Joint6 decrease
+                        'y': ('gripper', 1),          # Joint6 increase
                     }
                     
                     # First arm x,y coordinate control
                     arm1_xy_controls = {
-                        '8': ('x', -0.004),  # x decrease
-                        'u': ('x', 0.004),   # x increase
-                        '9': ('y', -0.004),  # y decrease
-                        'i': ('y', 0.004),   # y increase
+                        '2': ('x', -0.004),  # x decrease
+                        'w': ('x', 0.004),   # x increase
+                        '3': ('y', -0.004),  # y decrease
+                        'e': ('y', 0.004),   # y increase
                     }
                     
                     # Second arm control mapping: hbjnkml,;.'/
@@ -309,7 +311,7 @@ def p_control_loop(robots, keyboard, target_positions, start_positions, current_
                         'h': ('shoulder_pan', -1),    # Joint1 decrease
                         'b': ('shoulder_pan', 1),     # Joint1 increase
                         ';': ('wrist_roll', -1),      # Joint5 decrease
-                        'l': ('wrist_roll', 1),       # Joint5 increase
+                        '.': ('wrist_roll', 1),       # Joint5 increase
                         "'": ('gripper', -1),         # Joint6 decrease
                         '/': ('gripper', 1),          # Joint6 increase
                     }
@@ -323,18 +325,18 @@ def p_control_loop(robots, keyboard, target_positions, start_positions, current_
                     }
                     
                     # First arm pitch control
-                    if key == '=':
+                    if key == '4':
                         pitch['arm1'] += pitch_step
                         print(f"First arm increase pitch adjustment: {pitch['arm1']:.3f}")
-                    elif key == '[':
+                    elif key == 'r':
                         pitch['arm1'] -= pitch_step
                         print(f"First arm decrease pitch adjustment: {pitch['arm1']:.3f}")
                     
                     # Second arm pitch control
-                    elif key == ',':
+                    elif key == 'l':
                         pitch['arm2'] += pitch_step
                         print(f"Second arm increase pitch adjustment: {pitch['arm2']:.3f}")
-                    elif key == '.':
+                    elif key == ',':
                         pitch['arm2'] -= pitch_step
                         print(f"Second arm decrease pitch adjustment: {pitch['arm2']:.3f}")
                     
@@ -456,24 +458,25 @@ def main():
     try:
         # Import necessary modules
         # from lerobot.robots.so100_follower import SO100Follower, SO100FollowerConfig
-        # from lerobot.teleoperators.keyboard import KeyboardTeleop, KeyboardTeleopConfig
-
         from lerobot.robots.so_follower.so_follower import SO100Follower
         from lerobot.robots.so_follower.config_so_follower import SO100FollowerConfig
 
-        from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop
-        from lerobot.teleoperators.keyboard.configuration_keyboard import KeyboardTeleopConfig
+        from termios_keyboard import TermiosKeyboard
         
-        # Configure dual-arm robots
-        arm1_port = "/dev/ttyACM0"
-        arm2_port = "/dev/ttyACM1"
+        # Get arm configurations from xlerobot.json
+        config_path = os.path.join(os.path.dirname(__file__), "xlerobot.json")
+        with open(config_path, "r") as f:
+            config = json.load(f)
+            
+        arm1_config_data = config["left"]
+        arm2_config_data = config["right"]
         
-        print(f"Configuring first arm: {arm1_port}")  
-        print(f"Configuring second arm: {arm2_port}")
+        print(f"Configuring first arm (left): {arm1_config_data['port']}, robot_id: {arm1_config_data['robot-id']}")  
+        print(f"Configuring second arm (right): {arm2_config_data['port']}, robot_id: {arm2_config_data['robot-id']}")
         
         # Create dual-arm robot instances
-        arm1_config = SO100FollowerConfig(port=arm1_port)
-        arm2_config = SO100FollowerConfig(port=arm2_port)
+        arm1_config = SO100FollowerConfig(port=arm1_config_data["port"], id=arm1_config_data["robot-id"])
+        arm2_config = SO100FollowerConfig(port=arm2_config_data["port"], id=arm2_config_data["robot-id"])
         
         arm1_robot = SO100Follower(arm1_config)
         arm2_robot = SO100Follower(arm2_config)
@@ -484,8 +487,7 @@ def main():
         }
         
         # Configure keyboard
-        keyboard_config = KeyboardTeleopConfig()
-        keyboard = KeyboardTeleop(keyboard_config)
+        keyboard = TermiosKeyboard()
         
         # Connect devices
         print("Connecting first arm...")
@@ -496,22 +498,6 @@ def main():
         keyboard.connect()
         
         print("All devices connected successfully!")
-        
-        # Ask whether to recalibrate
-        while True:
-            calibrate_choice = input("Do you want to recalibrate the robots? (y/n): ").strip().lower()
-            if calibrate_choice in ['y', 'yes']:
-                print("Starting recalibration of dual arms...")
-                for arm_name, robot in robots.items():
-                    print(f"Calibrating {arm_name}...")
-                    robot.calibrate()
-                print("Dual arm calibration completed!")
-                break
-            elif calibrate_choice in ['n', 'no']:
-                print("Using previous calibration files")
-                break
-            else:
-                print("Please enter y or n")
         
         # Read starting joint angles
         print("Reading dual arm starting joint angles...")
@@ -564,20 +550,20 @@ def main():
         
         print("Dual arm keyboard control instructions:")
         print("First arm control (7y8u9i0o-p=[):")
-        print("- 7/y: Joint1 (shoulder_pan) decrease/increase")
-        print("- 8/u: Control end effector x coordinate (joint2+3)")
-        print("- 9/i: Control end effector y coordinate (joint2+3)")
-        print("- =/[: Pitch adjustment increase/decrease (affects wrist_flex)")
-        print("- 0/o: Joint5 (wrist_roll) decrease/increase")
-        print("- -/p: Joint6 (gripper) decrease/increase")
+        print("- 1/q: Joint1 (shoulder_pan) decrease/increase")
+        print("- 2/w: Control end effector x coordinate (joint2+3)")
+        print("- 3/e: Control end effector y coordinate (joint2+3)")
+        print("- 4/r: Pitch adjustment increase/decrease (affects wrist_flex)")
+        print("- 5/t: Joint5 (wrist_roll) decrease/increase")
+        print("- 6/y: Joint6 (gripper) decrease/increase")
         print("")
         print("Second arm control (hbjnkml,;.'/):")
         print("- h/b: Joint1 (shoulder_pan) decrease/increase")
         print("- j/n: Control end effector x coordinate (joint2+3)")
         print("- k/m: Control end effector y coordinate (joint2+3)")
-        print("- ,/.: Pitch adjustment increase/decrease (affects wrist_flex)")
-        print("- ;/l: Joint5 (wrist_roll) decrease/increase")
-        print("- '/: Joint6 (gripper) decrease/increase")
+        print("- l/,: Pitch adjustment increase/decrease (affects wrist_flex)")
+        print("- ;/.: Joint5 (wrist_roll) decrease/increase")
+        print("- '// Joint6 (gripper) decrease/increase")
         print("")
         print("- X: Exit program (return to start position first)")
         print("- ESC: Exit program")
@@ -604,4 +590,4 @@ def main():
         print("4. Are the robots properly configured")
 
 if __name__ == "__main__":
-    main() 
+    main()

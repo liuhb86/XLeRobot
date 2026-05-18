@@ -1,0 +1,11 @@
+-y dkms libevdev-dev libudev-dev cmake git
+-y libhidapi-dev libhidapi-hidraw0 libhidapi-libusb0
+libv4l-dev python3-opencv.
+vim
+code
+git-gui
+ripgrep
+tmux
+pipewire wireplumber pipewire-pulse bluez pavucontrol alsa-utils
+pulseaudio-utils
+uhubctl

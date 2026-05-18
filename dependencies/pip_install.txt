@@ -1,0 +1,11 @@
+(lerobot) robot@xlerobot~ $ uv pip tree --depth 0
+Using Python 3.12.13 environment at lerobot.venv
+aiohttp v3.13.5
+feetech-servo-sdk v1.0.0
+imageio-ffmpeg v0.6.0
+joycon-robotics v0.0.2
+lerobot v0.5.2
+opencv-python v4.13.0.92
+pyrealsense2 v2.57.7.10387
+rplidar-roboticia v0.9.5
+zmq v0.0.0

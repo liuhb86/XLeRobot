@@ -6,4 +6,4 @@
 	url = git@github.com:iotdesignshop/Feetech-tuna.git
 [submodule "dependencies/joycon-robotics"]
 	path = dependencies/joycon-robotics
-	url = git@github.com:box2ai-robotics/joycon-robotics.git
+	url = git@github.com:liuhb86/joycon-robotics.git

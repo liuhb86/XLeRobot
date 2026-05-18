@@ -1,0 +1,18 @@
+## uhubctl
+
+create `/etc/udev/rules.d/52-usb.rules`:
+```
+SUBSYSTEM=="usb", DRIVER=="hub|usb", MODE="0664", GROUP="dialout"
+# Linux 6.0 or later (its ok to have this block present for older Linux kernels):
+SUBSYSTEM=="usb", DRIVER=="hub|usb", \
+  RUN+="/bin/sh -c \"chown -f root:dialout $sys$devpath/*port*/disable || true\"" \
+  RUN+="/bin/sh -c \"chmod -f 660 $sys$devpath/*port*/disable || true\""
+```
+and then add permitted users to dialout group:
+```
+sudo usermod -a -G dialout $USER
+```
+For your udev rule changes to take effect, reboot or run:
+```
+sudo udevadm trigger --attr-match=subsystem=usb
+```

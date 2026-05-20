@@ -138,9 +138,8 @@ class FixedAxesJoyconRobotics(JoyconRobotics):
         if button_servo3_down == 1:
             self.position[2] -= speed_scale * self.dof_speed[2] * self.direction_reverse[2]
         
-        # Home button reset logic (simplified version)
-        joycon_button_home = self.joycon.get_button_home() if self.joycon.is_right() else self.joycon.get_button_capture()
-        if joycon_button_home == 1:
+        # Capture button reset logic for the left Joy-Con.
+        if not self.joycon.is_right() and self.joycon.get_button_capture() == 1:
             self.position = self.offset_position_m.copy()
         
         # Gripper control logic (hold for linear increase/decrease mode)
@@ -397,6 +396,14 @@ class SmoothBaseController:
         self.last_speed_down_pressed = False
         self.last_speed_up_pressed = False
 
+    def reset(self):
+        self.current_speed = 0.0
+        self.last_time = time.time()
+        self.last_direction = {"x.vel": 0.0, "theta.vel": 0.0}
+        self.is_moving = False
+        self.last_speed_down_pressed = False
+        self.last_speed_up_pressed = False
+
     def max_speed_multiplier(self, robot):
         level_index = min(robot.speed_index, len(BASE_TOP_SPEED_LEVELS) - 1)
         return BASE_TOP_SPEED_LEVELS[level_index]
@@ -534,76 +541,87 @@ def return_to_recorded_start(left_arm, right_arm, head_control, robot, duration_
         precise_sleep(1.0 / fps)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="XLeRobot 2Wheels Joy-Con teleoperation")
-    parser.add_argument(
-        "--log-rerun-data",
-        action="store_true",
-        help="Enable Rerun visualization logging. Disabled by default.",
+def initialize_joycons():
+    check_required_joycons_available()
+
+    # Initialize Joy-Con controllers before robot startup so missing controllers fail early.
+    print("[MAIN] Initializing right Joy-Con controller...")
+    joycon_right = FixedAxesJoyconRobotics(
+        "right",
+        dof_speed=[2, 2, 2, 1, 1, 1]
     )
-    args = parser.parse_args()
+    print("[MAIN] Right Joy-Con controller connected")
+    print("[MAIN] Initializing left Joy-Con controller...")
+    joycon_left = FixedAxesJoyconRobotics(
+        "left",
+        dof_speed=[2, 2, 2, 1, 1, 1]
+    )
+    print("[MAIN] Left Joy-Con controller connected")
 
-    FPS = 30
+    return joycon_right, joycon_left
 
-    joycon_right = None
-    joycon_left = None
-    robot = None
 
-    # Try to use saved calibration file to avoid recalibrating each time
-    # You can modify robot_id here to match your robot configuration
-    try:
-        check_required_joycons_available()
+def initialize_robot():
+    robot_config = XLerobot2WheelsConfig(id="my_xlerobot_2wheels_lab")  # Can be modified to your robot ID
+    robot = XLerobot2Wheels(robot_config)
 
-        # Initialize Joy-Con controllers before robot/Rerun startup so missing controllers fail early.
-        print("[MAIN] Initializing right Joy-Con controller...")
-        joycon_right = FixedAxesJoyconRobotics(
-            "right",
-            dof_speed=[2, 2, 2, 1, 1, 1]
-        )
-        print(f"[MAIN] Right Joy-Con controller connected")
-        print("[MAIN] Initializing left Joy-Con controller...")
-        joycon_left = FixedAxesJoyconRobotics(
-            "left",
-            dof_speed=[2, 2, 2, 1, 1, 1]
-        )
-        print(f"[MAIN] Left Joy-Con controller connected")
+    robot.connect()
+    print("[MAIN] Successfully connected to robot")
+    if robot.is_calibrated:
+        print("[MAIN] Robot is calibrated and ready to use!")
+    else:
+        print("[MAIN] Robot requires calibration")
 
-        robot_config = XLerobot2WheelsConfig(id="my_xlerobot_2wheels_lab")  # Can be modified to your robot ID
-        robot = XLerobot2Wheels(robot_config)
+    return robot, robot_config
 
-        robot.connect()
-        print(f"[MAIN] Successfully connected to robot")
-        if robot.is_calibrated:
-            print(f"[MAIN] Robot is calibrated and ready to use!")
-        else:
-            print(f"[MAIN] Robot requires calibration")
-    except Exception as e:
-        print(f"[MAIN] Startup failed: {e}")
-        if "robot_config" in locals():
-            print(f"[MAIN] Robot config: {robot_config}")
-        if robot is not None:
-            print(f"[MAIN] Robot: {robot}")
-        if joycon_right is not None:
-            joycon_right.disconnect()
-        if joycon_left is not None:
-            joycon_left.disconnect()
-        if robot is not None and robot.is_connected:
-            robot.disconnect()
-        return
 
-    if args.log_rerun_data:
-        init_rerun(session_name="xlerobot_2wheels_teleop_joycon")
+def cleanup_robot_session(
+    robot,
+    left_arm=None,
+    right_arm=None,
+    head_control=None,
+    return_to_start=True,
+    fps=30,
+    log_rerun=False,
+):
+    if return_to_start and robot is not None and robot.is_connected:
+        robot.send_action({"x.vel": 0.0, "theta.vel": 0.0})
+        if left_arm is not None and right_arm is not None and head_control is not None:
+            return_to_recorded_start(
+                left_arm,
+                right_arm,
+                head_control,
+                robot,
+                duration_s=2.0,
+                fps=fps,
+                log_rerun=log_rerun,
+            )
+    if robot is not None and robot.is_connected:
+        robot.disconnect()
 
-    # Init the arm and head instances
-    obs = robot.get_observation()
-    kin_left = SO101Kinematics()
-    kin_right = SO101Kinematics()
-    left_arm = SimpleTeleopArm(LEFT_JOINT_MAP, obs, kin_left, prefix="left")
-    right_arm = SimpleTeleopArm(RIGHT_JOINT_MAP, obs, kin_right, prefix="right")
-    head_control = SimpleHeadControl(obs)
 
-    print("[MAIN] Recorded startup arm and head positions. They will return there before quit.")
+def disconnect_joycons(joycon_right, joycon_left):
+    if joycon_right is not None:
+        joycon_right.disconnect()
+    if joycon_left is not None:
+        joycon_left.disconnect()
 
+
+def wait_for_home_wake(joycon_right, poll_interval_s=0.25):
+    print("[MAIN] Sleep mode active. Press the right Joy-Con Home button to wake.")
+    home_was_released = False
+    while True:
+        home_pressed = joycon_right.joycon.get_button_home() == 1
+        if not home_pressed:
+            home_was_released = True
+        elif home_was_released:
+            print("[MAIN] Wake requested. Re-initializing teleoperation...")
+            return
+
+        precise_sleep(poll_interval_s)
+
+
+def print_control_instructions(robot):
     # Print comprehensive keymap information based on robot config
     print("\n" + "="*80)
     print("🤖 XLeRobot 2Wheels Joy-Con Control Instructions")
@@ -661,72 +679,140 @@ def main():
     
     print("\n" + "="*80)
     print("🎮 Control started! Use Joy-Con to control robot")
+    print("   Hold the right Joy-Con Home button for 3 seconds to enter sleep mode")
     print("="*80 + "\n")
 
-    return_to_start_on_exit = True
+
+def run_control_loop(joycon_right, joycon_left, robot, left_arm, right_arm, head_control, args, fps):
+    sleep_hold_seconds = 3.0
+    sleep_button_pressed_at = None
+    while True:
+        pose_right, gripper_right, control_button_right = joycon_right.get_control()
+        # print(f"pose_right: {pose_right}, gripper_right: {gripper_right}, control_button_right: {control_button_right}")
+        pose_left, gripper_left, control_button_left = joycon_left.get_control()
+        # print(f"pose_left: {pose_left}, gripper_left: {gripper_left}, control_button_left: {control_button_left}")
+
+        if joycon_right.joycon.get_button_home() == 1:
+            if sleep_button_pressed_at is None:
+                sleep_button_pressed_at = time.time()
+                print("[MAIN] Right Home held. Keep holding for 3 seconds to sleep...")
+            elif time.time() - sleep_button_pressed_at >= sleep_hold_seconds:
+                print("[MAIN] Right Home held for 3 seconds. Entering sleep mode...")
+                return "sleep"
+        else:
+            sleep_button_pressed_at = None
+
+        if control_button_right == 8:  # reset button
+            print("[MAIN] Reset to zero position!")
+            right_arm.move_to_zero_position(robot)
+            left_arm.move_to_zero_position(robot)
+            head_control.move_to_zero_position(robot)
+            continue
+
+        # Handle gripper control - directly use Joy-Con gripper state
+        right_arm.target_positions["gripper"] = gripper_right
+        left_arm.target_positions["gripper"] = gripper_left
+
+        right_arm.handle_joycon_input(pose_right, gripper_right)
+        right_action = right_arm.p_control_action(robot)
+        left_arm.handle_joycon_input(pose_left, gripper_left)
+        left_action = left_arm.p_control_action(robot)
+        head_control.handle_joycon_input(joycon_right)
+        head_action = head_control.p_control_action(robot)
+
+        smooth_controller.update_speed_level(joycon_left, joycon_right, robot)
+        pressed_keys = get_joycon_base_pressed_keys(joycon_left, robot)
+
+        # Get smooth base action with linear acceleration/deceleration
+        smooth_base_action = smooth_controller.update(pressed_keys, robot)
+
+        # Merge all actions
+        action = {**left_action, **right_action, **head_action, **smooth_base_action}
+        robot.send_action(action)
+
+        if args.log_rerun_data:
+            obs = robot.get_observation()
+            log_rerun_data(obs, action)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="XLeRobot 2Wheels Joy-Con teleoperation")
+    parser.add_argument(
+        "--log-rerun-data",
+        action="store_true",
+        help="Enable Rerun visualization logging. Disabled by default.",
+    )
+    args = parser.parse_args()
+
+    FPS = 30
+
+    if args.log_rerun_data:
+        init_rerun(session_name="xlerobot_2wheels_teleop_joycon")
+
+    joycon_right = None
+    joycon_left = None
     try:
+        try:
+            joycon_right, joycon_left = initialize_joycons()
+        except Exception as e:
+            print(f"[MAIN] Joy-Con startup failed: {e}")
+            return
+
         while True:
-            pose_right, gripper_right, control_button_right = joycon_right.get_control()
-            # print(f"pose_right: {pose_right}, gripper_right: {gripper_right}, control_button_right: {control_button_right}")
-            pose_left, gripper_left, control_button_left = joycon_left.get_control()
-            # print(f"pose_left: {pose_left}, gripper_left: {gripper_left}, control_button_left: {control_button_left}")
+            robot = None
+            robot_config = None
+            left_arm = None
+            right_arm = None
+            head_control = None
+            try:
+                robot, robot_config = initialize_robot()
 
-            if joycon_right.joycon.get_button_home() == 1:
-                print("[MAIN] Right Home pressed. Exiting teleoperation...")
-                break
-
-            if control_button_right == 8:  # reset button
-                print("[MAIN] Reset to zero position!")
-                right_arm.move_to_zero_position(robot)
-                left_arm.move_to_zero_position(robot)
-                head_control.move_to_zero_position(robot)
-                continue
-
-            # Handle gripper control - directly use Joy-Con gripper state
-            right_arm.target_positions["gripper"] = gripper_right
-            left_arm.target_positions["gripper"] = gripper_left
-            
-            right_arm.handle_joycon_input(pose_right, gripper_right)
-            right_action = right_arm.p_control_action(robot)
-            left_arm.handle_joycon_input(pose_left, gripper_left)
-            left_action = left_arm.p_control_action(robot)
-            head_control.handle_joycon_input(joycon_right)
-            head_action = head_control.p_control_action(robot)
-
-            smooth_controller.update_speed_level(joycon_left, joycon_right, robot)
-            pressed_keys = get_joycon_base_pressed_keys(joycon_left, robot)
-            
-            # Get smooth base action with linear acceleration/deceleration
-            smooth_base_action = smooth_controller.update(pressed_keys, robot)
-
-            # Merge all actions
-            action = {**left_action, **right_action, **head_action, **smooth_base_action}
-            robot.send_action(action)
-
-            if args.log_rerun_data:
+                # Init the arm and head instances
                 obs = robot.get_observation()
-                log_rerun_data(obs, action)
+                kin_left = SO101Kinematics()
+                kin_right = SO101Kinematics()
+                left_arm = SimpleTeleopArm(LEFT_JOINT_MAP, obs, kin_left, prefix="left")
+                right_arm = SimpleTeleopArm(RIGHT_JOINT_MAP, obs, kin_right, prefix="right")
+                head_control = SimpleHeadControl(obs)
+
+                print("[MAIN] Recorded startup arm and head positions. They will return there before sleep/quit.")
+                print_control_instructions(robot)
+                smooth_controller.reset()
+
+                run_control_loop(
+                    joycon_right,
+                    joycon_left,
+                    robot,
+                    left_arm,
+                    right_arm,
+                    head_control,
+                    args,
+                    FPS,
+                )
+            except Exception as e:
+                print(f"[MAIN] Startup/control failed: {e}")
+                if robot_config is not None:
+                    print(f"[MAIN] Robot config: {robot_config}")
+                if robot is not None:
+                    print(f"[MAIN] Robot: {robot}")
+                return
+            finally:
+                cleanup_robot_session(
+                    robot,
+                    left_arm=left_arm,
+                    right_arm=right_arm,
+                    head_control=head_control,
+                    return_to_start=True,
+                    fps=FPS,
+                    log_rerun=args.log_rerun_data,
+                )
+
+            wait_for_home_wake(joycon_right)
     except KeyboardInterrupt:
         print("[MAIN] Keyboard interrupt received. Exiting teleoperation...")
     finally:
-        if return_to_start_on_exit and robot is not None and robot.is_connected:
-            robot.send_action({"x.vel": 0.0, "theta.vel": 0.0})
-            return_to_recorded_start(
-                left_arm,
-                right_arm,
-                head_control,
-                robot,
-                duration_s=2.0,
-                fps=FPS,
-                log_rerun=args.log_rerun_data,
-            )
-        if joycon_right is not None:
-            joycon_right.disconnect()
-        if joycon_left is not None:
-            joycon_left.disconnect()
-        if robot is not None and robot.is_connected:
-            robot.disconnect()
-        print("Teleoperation ended.")
+        disconnect_joycons(joycon_right, joycon_left)
+    print("Teleoperation ended.")
 
 if __name__ == "__main__":
     main()

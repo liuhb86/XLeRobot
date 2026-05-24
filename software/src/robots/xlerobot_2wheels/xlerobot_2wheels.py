@@ -169,31 +169,25 @@ class XLerobot2Wheels(Robot):
             cam.is_connected for cam in self.cameras.values()
         )
 
-    def connect(self, calibrate: bool = True) -> None:
+    def connect(self) -> None:
         if self.is_connected:
             raise DeviceAlreadyConnectedError(f"{self} already connected")
 
         self.bus1.connect()
         self.bus2.connect()
         
-        if self.calibration_fpath.is_file():
-            logger.info(f"Loading calibration from {self.calibration_fpath}")
-            try:
-                bus1_calibration = {k: v for k, v in self.calibration.items() if k in self.bus1.motors}
-                bus2_calibration = {k: v for k, v in self.calibration.items() if k in self.bus2.motors}
-                self.bus1.calibration = bus1_calibration
-                self.bus2.calibration = bus2_calibration
-                self.bus1.write_calibration(bus1_calibration)
-                self.bus2.write_calibration(bus2_calibration)
-                logger.info("Calibration restored successfully from file.")
-            except Exception as e:
-                logger.warning(f"Failed to restore calibration from file: {e}")
-                if calibrate:
-                    logger.info("Proceeding with manual calibration...")
-                    self.calibrate()
-        elif calibrate:
-            logger.info("No calibration file found, proceeding with manual calibration...")
-            self.calibrate()
+        logger.info("Checking motor calibration")
+
+        if not self.bus1.is_calibrated or not self.bus2.is_calibrated:
+            self.bus1.disconnect()
+            self.bus2.disconnect()
+            raise RuntimeError(
+                f"{self} is not calibrated. The configured calibration does not match the calibration stored "
+                "on the motors. "
+                "Run manual calibration before connecting."
+            )
+
+        logger.info("Configured calibration matches motor calibration.")
 
         for cam in self.cameras.values():
             cam.connect()
@@ -296,6 +290,10 @@ class XLerobot2Wheels(Robot):
             # Set I_Coefficient and D_Coefficient to default value 0 and 32
             self.bus1.write("I_Coefficient", name, 0)
             self.bus1.write("D_Coefficient", name, 43)
+            if name == "left_arm_gripper":
+                self.bus1.write("Max_Torque_Limit", name, 500)  # 50% of max torque to avoid burnout
+                self.bus1.write("Protection_Current", name, 250)  # 50% of max current to avoid burnout
+                self.bus1.write("Overload_Torque", name, 25)  # 25% torque when overloaded
         
         for name in self.head_motors:
             self.bus1.write("Operating_Mode", name, OperatingMode.POSITION.value)
@@ -312,6 +310,10 @@ class XLerobot2Wheels(Robot):
             # Set I_Coefficient and D_Coefficient to default value 0 and 32
             self.bus2.write("I_Coefficient", name, 0)
             self.bus2.write("D_Coefficient", name, 43)
+            if name == "right_arm_gripper":
+                self.bus2.write("Max_Torque_Limit", name, 500)  # 50% of max torque to avoid burnout
+                self.bus2.write("Protection_Current", name, 250)  # 50% of max current to avoid burnout
+                self.bus2.write("Overload_Torque", name, 25)  # 25% torque when overloaded
         
         for name in self.base_motors:
             self.bus2.write("Operating_Mode", name, OperatingMode.VELOCITY.value)
@@ -319,19 +321,6 @@ class XLerobot2Wheels(Robot):
         
         self.bus1.enable_torque()
         self.bus2.enable_torque()
-        
-
-    def setup_motors(self) -> None:
-        for motor in chain(reversed(self.left_arm_motors), reversed(self.head_motors)):
-            input(f"Connect the controller board to the '{motor}' motor only and press enter.")
-            self.bus1.setup_motor(motor)
-            print(f"'{motor}' motor id set to {self.bus1.motors[motor].id}")
-        
-        # Set up right arm motors
-        for motor in chain(reversed(self.right_arm_motors), reversed(self.base_motors)):
-            input(f"Connect the controller board to the '{motor}' motor only and press enter.")
-            self.bus2.setup_motor(motor)
-            print(f"'{motor}' motor id set to {self.bus2.motors[motor].id}")
         
 
     @staticmethod

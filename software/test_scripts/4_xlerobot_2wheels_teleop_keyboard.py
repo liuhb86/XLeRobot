@@ -555,11 +555,6 @@ def return_arms_to_recorded_start(left_arm, right_arm, robot, duration_s=2.0, fp
 def main():
     parser = argparse.ArgumentParser(description="XLeRobot 2Wheels keyboard teleoperation")
     parser.add_argument(
-        "--recalibrate",
-        action="store_true",
-        help="Run manual calibration after connecting instead of only using saved calibration.",
-    )
-    parser.add_argument(
         "--log-rerun-data",
         action="store_true",
         help="Enable Rerun visualization logging for observations and actions.",
@@ -582,10 +577,7 @@ def main():
     robot = XLerobot2Wheels(robot_config)
     
     try:
-        robot.connect(calibrate=not args.recalibrate)
-        if args.recalibrate:
-            print("[MAIN] Recalibration requested with --recalibrate.")
-            robot.calibrate()
+        robot.connect()
         print(f"[MAIN] Successfully connected to robot")
     except Exception as e:
         print(f"[MAIN] Failed to connect to robot: {e}")

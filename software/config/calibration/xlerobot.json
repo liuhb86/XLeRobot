@@ -51,9 +51,9 @@
     "head_motor_2": {
         "id": 8,
         "drive_mode": 0,
-        "homing_offset": 1377,
-        "range_min": 1669,
-        "range_max": 3192
+        "homing_offset": 1394,
+        "range_min": 1678,
+        "range_max": 3031
     },
     "right_arm_shoulder_pan": {
         "id": 1,

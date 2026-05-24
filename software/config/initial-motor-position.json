@@ -1,0 +1,19 @@
+{
+    "robot-id": "xlerobot",
+    "motor-states": {
+        "left_arm_shoulder_pan.pos": -3.875968992248062,
+        "left_arm_shoulder_lift.pos": -98.50498338870432,
+        "left_arm_elbow_flex.pos": 96.9438202247191,
+        "left_arm_wrist_flex.pos": 75.81949765857811,
+        "left_arm_wrist_roll.pos": -54.98575498575499,
+        "left_arm_gripper.pos": 1.0981468771448182,
+        "right_arm_shoulder_pan.pos": -4.737421961072343,
+        "right_arm_shoulder_lift.pos": -94.42827442827442,
+        "right_arm_elbow_flex.pos": 100.0,
+        "right_arm_wrist_flex.pos": 72.62711864406779,
+        "right_arm_wrist_roll.pos": -0.46398046398046233,
+        "right_arm_gripper.pos": 0.0,
+        "head_motor_1.pos": 0.41514041514041367,
+        "head_motor_2.pos": -40.42867701404287
+    }
+}

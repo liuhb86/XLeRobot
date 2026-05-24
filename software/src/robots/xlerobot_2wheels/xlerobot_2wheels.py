@@ -306,7 +306,7 @@ class XLerobot2Wheels(Robot):
         # and torque can be safely disabled to run calibration        
         self.bus1.disable_torque()
         self.bus2.disable_torque()
-        self.bus2.configure_motors()
+        self.bus1.configure_motors()
         self.bus2.configure_motors()
         
         for name in self.left_arm_motors:

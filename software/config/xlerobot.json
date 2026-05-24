@@ -1,6 +1,7 @@
 {
     "robot-id": "xlerobot",
     "calibration-dir": "calibration",
+    "initial-motor-position-file": "initial-motor-position.json",
     "left": {
         "port": "/dev/ttyACM0",
         "robot-id": "xlerobot_left"

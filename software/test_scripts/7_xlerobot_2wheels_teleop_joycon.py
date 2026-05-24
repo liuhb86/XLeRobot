@@ -17,6 +17,7 @@ PYTHONPATH=src python -m examples.xlerobot_2wheels.teleoperate_joycon
 #   * BASE_TOP_SPEED_LEVELS: maximum speed multiplier for each speed level
 
 import argparse
+import json
 from pathlib import Path
 import time
 import math
@@ -516,11 +517,45 @@ class SmoothBaseController:
 smooth_controller = SmoothBaseController()
 
 
-def return_to_recorded_start(left_arm, right_arm, head_control, robot, duration_s=2.0, fps=50, log_rerun=False):
-    print("[MAIN] Returning arms and head to recorded startup positions before quit.")
-    left_arm.target_positions = left_arm.joint_positions.copy()
-    right_arm.target_positions = right_arm.joint_positions.copy()
-    head_control.target_positions = head_control.head_positions.copy()
+def load_motor_states(fpath):
+    with open(fpath) as f:
+        data = json.load(f)
+
+    if "motor-states" not in data:
+        raise ValueError(f"Missing 'motor-states' in {fpath}")
+    return data["motor-states"]
+
+
+def resolve_initial_motor_position_file(config_path):
+    with open(config_path) as f:
+        data = json.load(f)
+
+    fpath = Path(data["initial-motor-position-file"]).expanduser()
+    if not fpath.is_absolute():
+        fpath = config_path.parent / fpath
+    return fpath
+
+
+def return_to_recorded_position(
+    left_arm,
+    right_arm,
+    head_control,
+    robot,
+    motor_states,
+    duration_s=2.0,
+    fps=50,
+    log_rerun=False,
+):
+    print("[MAIN] Returning arms and head to recorded motor positions before quit.")
+    left_arm.target_positions = {
+        joint: motor_states[f"{motor}.pos"] for joint, motor in left_arm.joint_map.items()
+    }
+    right_arm.target_positions = {
+        joint: motor_states[f"{motor}.pos"] for joint, motor in right_arm.joint_map.items()
+    }
+    head_control.target_positions = {
+        motor: motor_states[f"{motor}.pos"] for motor in head_control.target_positions
+    }
 
     deadline = time.time() + duration_s
     while time.time() < deadline:
@@ -572,13 +607,15 @@ def main():
         config_path = Path(__file__).resolve().parents[1] / "config" / "xlerobot.json"
         robot_config = XLerobot2WheelsConfig.from_json(config_path)
         robot = XLerobot2Wheels(robot_config)
+        return_position_config = resolve_initial_motor_position_file(config_path)
 
         robot.connect()
         print(f"[MAIN] Successfully connected to robot")
-        if robot.is_calibrated:
-            print(f"[MAIN] Robot is calibrated and ready to use!")
-        else:
-            print(f"[MAIN] Robot requires calibration")
+        if not robot.is_calibrated:
+            raise RuntimeError("Robot requires calibration before teleop.")
+        print(f"[MAIN] Robot is calibrated and ready to use!")
+        return_motor_states = load_motor_states(return_position_config)
+        print(f"[MAIN] Loaded return motor states from {return_position_config}")
     except Exception as e:
         print(f"[MAIN] Startup failed: {e}")
         if "robot_config" in locals():
@@ -604,7 +641,7 @@ def main():
     right_arm = SimpleTeleopArm(RIGHT_JOINT_MAP, obs, kin_right, prefix="right")
     head_control = SimpleHeadControl(obs)
 
-    print("[MAIN] Recorded startup arm and head positions. They will return there before quit.")
+    print("[MAIN] Loaded recorded arm and head positions. They will return there before quit.")
 
     # Print comprehensive keymap information based on robot config
     print("\n" + "="*80)
@@ -713,11 +750,12 @@ def main():
     finally:
         if return_to_start_on_exit and robot is not None and robot.is_connected:
             robot.send_action({"x.vel": 0.0, "theta.vel": 0.0})
-            return_to_recorded_start(
+            return_to_recorded_position(
                 left_arm,
                 right_arm,
                 head_control,
                 robot,
+                return_motor_states,
                 duration_s=2.0,
                 fps=FPS,
                 log_rerun=args.log_rerun_data,

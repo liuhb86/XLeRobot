@@ -17,6 +17,8 @@ PYTHONPATH=src python -m examples.xlerobot_2wheels.teleoperate_joycon
 #   * BASE_TOP_SPEED_LEVELS: maximum speed multiplier for each speed level
 
 import argparse
+import json
+from pathlib import Path
 import time
 import math
 
@@ -138,8 +140,9 @@ class FixedAxesJoyconRobotics(JoyconRobotics):
         if button_servo3_down == 1:
             self.position[2] -= speed_scale * self.dof_speed[2] * self.direction_reverse[2]
         
-        # Capture button reset logic for the left Joy-Con.
-        if not self.joycon.is_right() and self.joycon.get_button_capture() == 1:
+        # Home button reset logic (simplified version)
+        joycon_button_home = self.joycon.get_button_home() if self.joycon.is_right() else self.joycon.get_button_capture()
+        if joycon_button_home == 1:
             self.position = self.offset_position_m.copy()
         
         # Gripper control logic (hold for linear increase/decrease mode)
@@ -396,14 +399,6 @@ class SmoothBaseController:
         self.last_speed_down_pressed = False
         self.last_speed_up_pressed = False
 
-    def reset(self):
-        self.current_speed = 0.0
-        self.last_time = time.time()
-        self.last_direction = {"x.vel": 0.0, "theta.vel": 0.0}
-        self.is_moving = False
-        self.last_speed_down_pressed = False
-        self.last_speed_up_pressed = False
-
     def max_speed_multiplier(self, robot):
         level_index = min(robot.speed_index, len(BASE_TOP_SPEED_LEVELS) - 1)
         return BASE_TOP_SPEED_LEVELS[level_index]
@@ -522,11 +517,45 @@ class SmoothBaseController:
 smooth_controller = SmoothBaseController()
 
 
-def return_to_recorded_start(left_arm, right_arm, head_control, robot, duration_s=2.0, fps=50, log_rerun=False):
-    print("[MAIN] Returning arms and head to recorded startup positions before quit.")
-    left_arm.target_positions = left_arm.joint_positions.copy()
-    right_arm.target_positions = right_arm.joint_positions.copy()
-    head_control.target_positions = head_control.head_positions.copy()
+def load_motor_states(fpath):
+    with open(fpath) as f:
+        data = json.load(f)
+
+    if "motor-states" not in data:
+        raise ValueError(f"Missing 'motor-states' in {fpath}")
+    return data["motor-states"]
+
+
+def resolve_initial_motor_position_file(config_path):
+    with open(config_path) as f:
+        data = json.load(f)
+
+    fpath = Path(data["initial-motor-position-file"]).expanduser()
+    if not fpath.is_absolute():
+        fpath = config_path.parent / fpath
+    return fpath
+
+
+def return_to_recorded_position(
+    left_arm,
+    right_arm,
+    head_control,
+    robot,
+    motor_states,
+    duration_s=2.0,
+    fps=50,
+    log_rerun=False,
+):
+    print("[MAIN] Returning arms and head to recorded motor positions before quit.")
+    left_arm.target_positions = {
+        joint: motor_states[f"{motor}.pos"] for joint, motor in left_arm.joint_map.items()
+    }
+    right_arm.target_positions = {
+        joint: motor_states[f"{motor}.pos"] for joint, motor in right_arm.joint_map.items()
+    }
+    head_control.target_positions = {
+        motor: motor_states[f"{motor}.pos"] for motor in head_control.target_positions
+    }
 
     deadline = time.time() + duration_s
     while time.time() < deadline:
@@ -562,17 +591,20 @@ def initialize_joycons():
 
 
 def initialize_robot():
-    robot_config = XLerobot2WheelsConfig(id="my_xlerobot_2wheels_lab")  # Can be modified to your robot ID
+    config_path = Path(__file__).resolve().parents[1] / "config" / "xlerobot.json"
+    robot_config = XLerobot2WheelsConfig.from_json(config_path)
     robot = XLerobot2Wheels(robot_config)
+    return_position_config = resolve_initial_motor_position_file(config_path)
 
     robot.connect()
     print("[MAIN] Successfully connected to robot")
-    if robot.is_calibrated:
-        print("[MAIN] Robot is calibrated and ready to use!")
-    else:
-        print("[MAIN] Robot requires calibration")
+    if not robot.is_calibrated:
+        raise RuntimeError("Robot requires calibration before teleop.")
+    print("[MAIN] Robot is calibrated and ready to use!")
+    return_motor_states = load_motor_states(return_position_config)
+    print(f"[MAIN] Loaded return motor states from {return_position_config}")
 
-    return robot, robot_config
+    return robot, robot_config, return_motor_states
 
 
 def cleanup_robot_session(
@@ -580,18 +612,25 @@ def cleanup_robot_session(
     left_arm=None,
     right_arm=None,
     head_control=None,
+    return_motor_states=None,
     return_to_start=True,
     fps=30,
     log_rerun=False,
 ):
     if return_to_start and robot is not None and robot.is_connected:
         robot.send_action({"x.vel": 0.0, "theta.vel": 0.0})
-        if left_arm is not None and right_arm is not None and head_control is not None:
-            return_to_recorded_start(
+        if (
+            left_arm is not None
+            and right_arm is not None
+            and head_control is not None
+            and return_motor_states is not None
+        ):
+            return_to_recorded_position(
                 left_arm,
                 right_arm,
                 head_control,
                 robot,
+                return_motor_states,
                 duration_s=2.0,
                 fps=fps,
                 log_rerun=log_rerun,
@@ -688,9 +727,7 @@ def run_control_loop(joycon_right, joycon_left, robot, left_arm, right_arm, head
     sleep_button_pressed_at = None
     while True:
         pose_right, gripper_right, control_button_right = joycon_right.get_control()
-        # print(f"pose_right: {pose_right}, gripper_right: {gripper_right}, control_button_right: {control_button_right}")
         pose_left, gripper_left, control_button_left = joycon_left.get_control()
-        # print(f"pose_left: {pose_left}, gripper_left: {gripper_left}, control_button_left: {control_button_left}")
 
         if joycon_right.joycon.get_button_home() == 1:
             if sleep_button_pressed_at is None:
@@ -712,7 +749,7 @@ def run_control_loop(joycon_right, joycon_left, robot, left_arm, right_arm, head
         # Handle gripper control - directly use Joy-Con gripper state
         right_arm.target_positions["gripper"] = gripper_right
         left_arm.target_positions["gripper"] = gripper_left
-
+            
         right_arm.handle_joycon_input(pose_right, gripper_right)
         right_action = right_arm.p_control_action(robot)
         left_arm.handle_joycon_input(pose_left, gripper_left)
@@ -722,7 +759,7 @@ def run_control_loop(joycon_right, joycon_left, robot, left_arm, right_arm, head
 
         smooth_controller.update_speed_level(joycon_left, joycon_right, robot)
         pressed_keys = get_joycon_base_pressed_keys(joycon_left, robot)
-
+            
         # Get smooth base action with linear acceleration/deceleration
         smooth_base_action = smooth_controller.update(pressed_keys, robot)
 
@@ -764,8 +801,9 @@ def main():
             left_arm = None
             right_arm = None
             head_control = None
+            return_motor_states = None
             try:
-                robot, robot_config = initialize_robot()
+                robot, robot_config, return_motor_states = initialize_robot()
 
                 # Init the arm and head instances
                 obs = robot.get_observation()
@@ -775,7 +813,7 @@ def main():
                 right_arm = SimpleTeleopArm(RIGHT_JOINT_MAP, obs, kin_right, prefix="right")
                 head_control = SimpleHeadControl(obs)
 
-                print("[MAIN] Recorded startup arm and head positions. They will return there before sleep/quit.")
+                print("[MAIN] Loaded recorded arm and head positions. They will return there before sleep/quit.")
                 print_control_instructions(robot)
                 smooth_controller.reset()
 
@@ -802,6 +840,7 @@ def main():
                     left_arm=left_arm,
                     right_arm=right_arm,
                     head_control=head_control,
+                    return_motor_states=return_motor_states,
                     return_to_start=True,
                     fps=FPS,
                     log_rerun=args.log_rerun_data,

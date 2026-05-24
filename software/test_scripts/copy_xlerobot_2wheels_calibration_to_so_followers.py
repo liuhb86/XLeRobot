@@ -42,7 +42,7 @@ def parse_args():
     parser.add_argument(
         "--robot-config",
         type=Path,
-        default=Path(__file__).with_name("xlerobot.json"),
+        default=Path(__file__).resolve().parents[1] / "config" / "xlerobot.json",
         help="Example robot config used to get left/right SOFollower ids.",
     )
     parser.add_argument("--left-id", type=str, default=None, help="Target SOFollower id for the left arm.")

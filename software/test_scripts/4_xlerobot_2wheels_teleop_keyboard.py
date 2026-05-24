@@ -9,6 +9,7 @@ PYTHONPATH=src python -m examples.xlerobot_2wheels.teleoperate_Keyboard
 '''
 
 import argparse
+from pathlib import Path
 import time
 import numpy as np
 import math
@@ -561,19 +562,19 @@ def main():
     )
     args = parser.parse_args()
 
+    config_path = Path(__file__).resolve().parents[1] / "config" / "xlerobot.json"
+
     # Teleop parameters
     FPS = 50
     # ip = "192.168.1.123"  # This is for zmq connection
     ip = "localhost"  # This is for local/wired connection
-    # robot_name = "my_xlerobot_2wheels_pc"
-    robot_name = "my_xlerobot_2wheels_lab"
 
     # For zmq connection
     # robot_config = XLerobot2WheelsClientConfig(remote_ip=ip, id=robot_name)
     # robot = XLerobot2WheelsClient(robot_config)    
 
     # For local/wired connection
-    robot_config = XLerobot2WheelsConfig(id=robot_name)
+    robot_config = XLerobot2WheelsConfig.from_json(config_path)
     robot = XLerobot2Wheels(robot_config)
     
     try:

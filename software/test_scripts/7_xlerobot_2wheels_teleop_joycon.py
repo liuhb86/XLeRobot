@@ -17,6 +17,7 @@ PYTHONPATH=src python -m examples.xlerobot_2wheels.teleoperate_joycon
 #   * BASE_TOP_SPEED_LEVELS: maximum speed multiplier for each speed level
 
 import argparse
+from pathlib import Path
 import time
 import math
 
@@ -568,7 +569,8 @@ def main():
         )
         print(f"[MAIN] Left Joy-Con controller connected")
 
-        robot_config = XLerobot2WheelsConfig(id="my_xlerobot_2wheels_lab")  # Can be modified to your robot ID
+        config_path = Path(__file__).resolve().parents[1] / "config" / "xlerobot.json"
+        robot_config = XLerobot2WheelsConfig.from_json(config_path)
         robot = XLerobot2Wheels(robot_config)
 
         robot.connect()

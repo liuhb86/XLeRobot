@@ -1,4 +1,6 @@
 {
+    "robot-id": "xlerobot",
+    "calibration-dir": "calibration",
     "left": {
         "port": "/dev/ttyACM0",
         "robot-id": "xlerobot_left"

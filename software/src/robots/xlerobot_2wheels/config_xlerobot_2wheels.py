@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from lerobot.cameras.configs import CameraConfig, Cv2Rotation, ColorMode
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
@@ -83,6 +85,25 @@ class XLerobot2WheelsConfig(RobotConfig):
             "quit": "b",
         }
     )
+
+    @classmethod
+    def from_json(cls, fpath: str | Path) -> "XLerobot2WheelsConfig":
+        fpath = Path(fpath).expanduser()
+        with open(fpath) as f:
+            data = json.load(f)
+
+        calibration_dir = data.get("calibration-dir")
+        if calibration_dir:
+            calibration_dir = Path(calibration_dir).expanduser()
+            if not calibration_dir.is_absolute():
+                calibration_dir = fpath.parent / calibration_dir
+
+        return cls(
+            id=data.get("robot-id"),
+            calibration_dir=calibration_dir,
+            port1=data["left"]["port"],
+            port2=data["right"]["port"],
+        )
 
 
 

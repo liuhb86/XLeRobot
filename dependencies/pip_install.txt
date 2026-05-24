@@ -9,3 +9,4 @@ opencv-python v4.13.0.92
 pyrealsense2 v2.57.7.10387
 rplidar-roboticia v0.9.5
 zmq v0.0.0
+depthai v3.6.1

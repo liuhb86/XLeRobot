@@ -9,7 +9,7 @@ import time
 from joyconrobotics import JoyconRobotics
 from joyconrobotics.device import get_L_id, get_R_id
 
-from robot_controller import BASE_BACKWARD, BASE_FORWARD, BASE_ROTATE_LEFT, BASE_ROTATE_RIGHT
+from base_controller import BASE_BACKWARD, BASE_FORWARD, BASE_ROTATE_LEFT, BASE_ROTATE_RIGHT
 
 SLEEP_HOLD_SECONDS = 3.0
 

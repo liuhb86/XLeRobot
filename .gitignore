@@ -63,6 +63,7 @@ log/
 Thumbs.db
 .ipynb_checkpoints/
 .cache/
+~$*
 
 # IDE and editor folders
 .idea/

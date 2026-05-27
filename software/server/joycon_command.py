@@ -41,45 +41,22 @@ def check_required_joycons_available():
             f"Detected ids: {details}. Pair/connect both Joy-Cons, then run this script again."
         )
 
-
 class JoyConHalfCommand:
-    def __init__(
-        self,
-        device,
-        command_handler=None,
-        gripper_state=1.0,
-        offset_position_m=None,
-        offset_euler_rad=None,
-        euler_reverse=None,
-        direction_reverse=None,
-        dof_speed=None,
-        rotation_filter_alpha_rate=1,
-        common_rad=True,
-        lerobot=False,
-        pitch_down_double=False,
-        without_rest_init=False,
-        change_down_to_gripper=False,
-    ):
+    def __init__(self, device, reset_device=True):
         self.joycon_id = find_joycon_id(device)
         self.joycon = JoyCon(*self.joycon_id)
         self.gyro = GyroTrackingJoyCon(*self.joycon_id)
         self.orientation_sensor = AttitudeEstimator(
-            common_rad=common_rad,
-            lerobot=lerobot,
-            pitch_down_double=pitch_down_double,
-            lowpassfilter_alpha_rate=rotation_filter_alpha_rate,
+            common_rad=True,
+            lerobot=False,
+            pitch_down_double=False,
+            lowpassfilter_alpha_rate=1,
         )
-        self.command_handler = command_handler
-        self.gripper_state = gripper_state
-        self.position = (offset_position_m or [0.0, 0.0, 0.0]).copy()
-        self.orientation_rad = (offset_euler_rad or [0.0, 0.0, 0.0]).copy()
-        self.offset_euler_rad = (offset_euler_rad or [0.0, 0.0, 0.0]).copy()
-        self.euler_reverse = (euler_reverse or [1, 1, 1]).copy()
-        self.direction_reverse = (direction_reverse or [1, 1, 1]).copy()
-        self.dof_speed = (dof_speed or [1, 1, 1, 1, 1, 1]).copy()
-        self.change_down_to_gripper = change_down_to_gripper
+        self.gripper_state = 1.0
+        self.position = [0.0, 0.0, 0.0]
+        self.dof_speed = [2, 2, 2, 1, 1, 1]
 
-        if not without_rest_init:
+        if reset_device:
             self.reset_joycon()
 
         if self.joycon.is_right():
@@ -93,13 +70,9 @@ class JoyConHalfCommand:
         self.gripper_direction = 1
         self.gripper_min = 0
         self.gripper_max = 90
-        self.last_gripper_button_state = 0
-        self.running = True
-        self.thread = threading.Thread(target=self.solve_loop, daemon=True)
-        self.thread.start()
+        self.last_gripper_button_state = 0  
 
     def disconnect(self):
-        self.running = False
         self.joycon._close()
         self.gyro._close()
 
@@ -111,35 +84,17 @@ class JoyConHalfCommand:
         self.orientation_sensor.reset_yaw()
         print("\033[32mJoycon calibrations is complete.\033[0m")
 
-    def get_orientation(self):
-        self.orientation_rad = self.orientation_sensor.update(self.gyro.gyro_in_rad[0], self.gyro.accel_in_g[0])
-        for i in range(3):
-            self.orientation_rad[i] = (self.orientation_rad[i] + self.offset_euler_rad[i]) * self.euler_reverse[i]
-        return self.orientation_rad
-
-    def solve_loop(self):
-        while self.running:
-            try:
-                self.update()
-
-                if self.command_handler is not None and self.command_handler.sleep_requested:
-                    time.sleep(ASLEEP_SOLVE_LOOP_SLEEP_SECONDS)
-                else:
-                    time.sleep(ACTIVE_SOLVE_LOOP_SLEEP_SECONDS)
-            except Exception as exc:
-                print(f"[JOYCON] Error in solve_loop from device: {exc}")
-                time.sleep(ASLEEP_SOLVE_LOOP_SLEEP_SECONDS)
-
     def update(self):
         speed_scale = 0.001
-        _roll, pitch, _yaw = self.get_orientation()
+        orientation_rad = self.orientation_sensor.update(self.gyro.gyro_in_rad[0], self.gyro.accel_in_g[0])
+        _roll, pitch, _yaw = orientation_rad
 
         def move_servo2(direction):
-            self.position[0] += speed_scale * direction * self.dof_speed[0] * self.direction_reverse[0] * math.cos(pitch)
-            self.position[2] += speed_scale * direction * self.dof_speed[1] * self.direction_reverse[1] * math.sin(pitch)
+            self.position[0] += speed_scale * direction * self.dof_speed[0] * math.cos(pitch)
+            self.position[2] += speed_scale * direction * self.dof_speed[1] * math.sin(pitch)
 
         def move_y(direction):
-            self.position[1] += speed_scale * direction * self.dof_speed[1] * self.direction_reverse[1]
+            self.position[1] += speed_scale * direction * self.dof_speed[1]
 
         if self.joycon.is_right():
             button_y_left = self.joycon.get_button_y()
@@ -165,21 +120,15 @@ class JoyConHalfCommand:
         if button_b_backward == 1:
             move_servo2(-1)
         if button_servo3_up == 1:
-            self.position[2] += speed_scale * self.dof_speed[2] * self.direction_reverse[2]
+            self.position[2] += speed_scale * self.dof_speed[2]
         if button_servo3_down == 1:
-            self.position[2] -= speed_scale * self.dof_speed[2] * self.direction_reverse[2]
+            self.position[2] -= speed_scale * self.dof_speed[2]
 
         gripper_button_pressed = False
         if self.joycon.is_right():
-            if not self.change_down_to_gripper:
-                gripper_button_pressed = self.joycon.get_button_zr() == 1
-            else:
-                gripper_button_pressed = self.joycon.get_button_stick_r_btn() == 1
+            gripper_button_pressed = self.joycon.get_button_zr() == 1
         else:
-            if not self.change_down_to_gripper:
-                gripper_button_pressed = self.joycon.get_button_zl() == 1
-            else:
-                gripper_button_pressed = self.joycon.get_button_stick_l_btn() == 1
+            gripper_button_pressed = self.joycon.get_button_zl() == 1
 
         if gripper_button_pressed and self.last_gripper_button_state == 0:
             self.gripper_direction *= -1
@@ -191,11 +140,7 @@ class JoyConHalfCommand:
             if self.gripper_min <= new_gripper_state <= self.gripper_max:
                 self.gripper_state = new_gripper_state
 
-        if self.command_handler is not None:
-            pose = [*self.position, *self.orientation_rad]
-            self.command_handler.handle_joycon_update(self, pose, self.gripper_state)
-
-
+        return (self.position, orientation_rad, self.gripper_state)
 
 class JoyConCommand:
     """Routes Joy-Con thread updates into RobotController target state."""
@@ -206,19 +151,24 @@ class JoyConCommand:
         self.joycon_left = None
         self.fps = fps
         self.log_rerun = log_rerun
-        self.sleep_requested = False
-        self.last_speed_down_pressed = False
-        self.last_speed_up_pressed = False
-        self._started = False
+
         self._stop_event = threading.Event()
         self._stop_event.set()
+        self.sleep_requested = False
         self._sleep_button_pressed_at = None
 
+        self.last_speed_down_pressed = False
+        self.last_speed_up_pressed = False
+
+        self._thread = None
+        self._thread_error = None
+
+        
     def bind_robot_controller(self, robot_controller):
         self.robot_controller = robot_controller
 
     def connect(self):
-        self.joycon_right, self.joycon_left = _initialize_joycons(self)
+        self.joycon_right, self.joycon_left = _initialize_joycons()
 
     def disconnect(self):
         stop_error = None
@@ -239,7 +189,7 @@ class JoyConCommand:
             raise RuntimeError("RobotController is not bound.")
         if self.joycon_right is None or self.joycon_left is None:
             raise RuntimeError("Joy-Cons are not connected.")
-        if self._started:
+        if self._thread is not None:
             return
 
         self.sleep_requested = False
@@ -247,51 +197,43 @@ class JoyConCommand:
         self.last_speed_up_pressed = False
         self._sleep_button_pressed_at = None
         self._stop_event.clear()
-        self._started = True
-        self.robot_controller.base_controller.reset()
+        self._thread_error = None
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
 
     def stop(self, timeout=2.0):
         self._stop_event.set()
-        self._started = False
+        if self._thread is not None:
+            self._thread.join(timeout=timeout)
+            if not self._thread.is_alive():
+                self._thread = None
+        if self._thread_error is not None:
+            error = self._thread_error
+            self._thread_error = None
+            raise error
 
-    def wait_for_wake(self, poll_interval_s=1):
-        if self.joycon_right is None:
-            raise RuntimeError("Joy-Cons are not connected.")
-        _wait_for_home_wake(
-            self.joycon_right,
-            self.joycon_left,
-            self.robot_controller,
-            self._stop_event,
-            poll_interval_s=poll_interval_s,
-        )
+    def _run(self):
+        try:
+            while not self._stop_event.is_set():
+                if self._handle_sleep_button():
+                    continue
+                with self.robot_controller._lock:
+                    self._update_arm_target(self.joycon_left, self.robot_controller.left_arm)
+                    self._update_arm_target(self.joycon_right, self.robot_controller.right_arm)
+                    self._update_head_target()
+                    self._update_base_speed_level()
+                    directions = get_joycon_base_directions(self.joycon_left)
+                    self.robot_controller.base_controller.update(directions)
+                self._stop_event.wait(1.0 / self.fps)
+        except Exception as exc:
+            self._thread_error = exc
+            self._stop_event.set()
 
-    def _handle_sleep_button(self):
-        if self.joycon_right.joycon.get_button_home() != 1:
-            self._sleep_button_pressed_at = None
-            return False
-
-        if self._sleep_button_pressed_at is None:
-            self._sleep_button_pressed_at = time.time()
-            print("[JOYCON] Right Home held. Keep holding for 3 seconds to sleep...")
-            return False
-
-        if time.time() - self._sleep_button_pressed_at < SLEEP_HOLD_SECONDS:
-            return False
-
-        self._sleep_until_wake()
-        return True
-
-    def _sleep_until_wake(self):
-        print("[JOYCON] Right Home held for 3 seconds. Entering sleep mode...")
-        self.sleep_requested = True
-        self.robot_controller.sleep(return_to_start=True)
-        self.wait_for_wake()
-        if self._stop_event.is_set():
-            return
-        self.robot_controller.wake()
-        self.sleep_requested = False
-        self._sleep_button_pressed_at = None
-        self.robot_controller.base_controller.reset()
+    def _update_arm_target(self, joycon, arm_controller):
+        (position, orientation_rad, gripper_state) = joycon.update()
+        pose = [*position, *orientation_rad]
+        arm_controller.set_end_effector_target(pose, gripper_state)
 
     def _update_base_speed_level(self):
         speed_down_pressed = self.joycon_left.joycon.get_button_left_sl() == 1
@@ -304,38 +246,6 @@ class JoyConCommand:
 
         self.last_speed_down_pressed = speed_down_pressed
         self.last_speed_up_pressed = speed_up_pressed
-
-    def handle_joycon_update(self, joycon, pose, gripper_state):
-        if self.robot_controller is None or self._stop_event.is_set():
-            return
-
-        try:
-            if joycon is self.joycon_right:
-                if self._quit_buttons_pressed():
-                    print("[JOYCON] Quit requested by Capture + Home.")
-                    self.robot_controller.set_quit_status(True)
-                    self._stop_event.set()
-                    return
-
-                if self._handle_sleep_button():
-                    return
-
-            if self.sleep_requested:
-                return
-
-            with self.robot_controller._lock:
-                if joycon is self.joycon_right:
-                    self.robot_controller.right_arm.set_end_effector_target(pose, gripper_state)
-                    self._update_head_target()
-                    self._update_base_speed_level()
-                    directions = get_joycon_base_directions(self.joycon_left)
-                    self.robot_controller.base_controller.update(directions)
-                elif joycon is self.joycon_left:
-                    self.robot_controller.left_arm.set_end_effector_target(pose, gripper_state)
-        except Exception as exc:
-            print(f"[JOYCON] Update failed: {exc}")
-            self.robot_controller.set_quit_status(True)
-            self._stop_event.set()
 
     def _update_head_target(self):
         stick_vertical = self.joycon_right.joycon.get_stick_right_vertical()
@@ -357,11 +267,58 @@ class JoyConCommand:
             self.robot_controller.head.increment_target(head_motor_1_delta, head_motor_2_delta)
 
     def _quit_buttons_pressed(self):
-        return (
-            self.joycon_left.joycon.get_button_capture() == 1
-            and self.joycon_right.joycon.get_button_home() == 1
-        )
+        if self.joycon_right.joycon.get_button_home() == 1 and self.joycon_left.joycon.get_button_capture() == 1:
+            print("[JOYCON] Quit requested by Capture + Home.")
+            self.robot_controller.set_quit_status(True)
+            self._stop_event.set()
+            return True
+        else:
+            return False
+    
+    def _handle_sleep_button(self):
+        if self.joycon_right.joycon.get_button_home() != 1:
+            self._sleep_button_pressed_at = None
+            return False
+        
+        if self._quit_buttons_pressed():
+            return True
 
+        if self._sleep_button_pressed_at is None:
+            self._sleep_button_pressed_at = time.time()
+            print("[JOYCON] Right Home held. Keep holding for 3 seconds to sleep...")
+            return False
+
+        if time.time() - self._sleep_button_pressed_at < SLEEP_HOLD_SECONDS:
+            return False
+
+        self._sleep_until_wake()
+        return True
+
+    def _sleep_until_wake(self):
+        print("[JOYCON] Right Home held for 3 seconds. Entering sleep mode...")
+        self.sleep_requested = True
+        self.robot_controller.sleep(return_to_start=True)
+        self._wait_for_home_wake()
+        if self._stop_event.is_set():
+            return
+        self.robot_controller.wake()
+        self.sleep_requested = False
+        self._sleep_button_pressed_at = None
+        self.robot_controller.base_controller.reset()
+
+    def _wait_for_home_wake(self, poll_interval_s=1):
+        print("[MAIN] Sleep mode active. Press the right Joy-Con Home button to wake.")
+        home_was_released = False
+        while not self._stop_event.is_set():
+            if self._quit_buttons_pressed():
+                break
+            home_pressed = self.joycon_right.joycon.get_button_home() == 1
+            if not home_pressed:
+                home_was_released = True
+            elif home_was_released:
+                print("[MAIN] Wake requested. Re-initializing teleoperation...")
+                return
+            self._stop_event.wait(poll_interval_s)
 
 def get_joycon_base_directions(joycon):
     stick_vertical = joycon.joycon.get_stick_left_vertical()
@@ -386,13 +343,13 @@ def get_joycon_base_directions(joycon):
     return directions
 
 
-def _initialize_joycons(command_handler):
+def _initialize_joycons():
     check_required_joycons_available()
     print("[MAIN] Initializing right Joy-Con controller...")
-    joycon_right = JoyConHalfCommand("right", command_handler, dof_speed=[2, 2, 2, 1, 1, 1])
+    joycon_right = JoyConHalfCommand("right")
     print("[MAIN] Right Joy-Con controller connected")
     print("[MAIN] Initializing left Joy-Con controller...")
-    joycon_left = JoyConHalfCommand("left", command_handler, dof_speed=[2, 2, 2, 1, 1, 1])
+    joycon_left = JoyConHalfCommand("left")
     print("[MAIN] Left Joy-Con controller connected")
     return joycon_right, joycon_left
 
@@ -402,22 +359,3 @@ def _disconnect_joycons(joycon_right, joycon_left):
         joycon_right.disconnect()
     if joycon_left is not None:
         joycon_left.disconnect()
-
-
-def _wait_for_home_wake(joycon_right, joycon_left, robot_controller, stop_event, poll_interval_s=0.25):
-    print("[MAIN] Sleep mode active. Press the right Joy-Con Home button to wake.")
-    home_was_released = False
-    while not stop_event.is_set():
-        if joycon_left.joycon.get_button_capture() == 1 and joycon_right.joycon.get_button_home() == 1:
-            print("[JOYCON] Quit requested by Capture + Home.")
-            robot_controller.set_quit_status(True)
-            stop_event.set()
-            return
-
-        home_pressed = joycon_right.joycon.get_button_home() == 1
-        if not home_pressed:
-            home_was_released = True
-        elif home_was_released:
-            print("[MAIN] Wake requested. Re-initializing teleoperation...")
-            return
-        stop_event.wait(poll_interval_s)

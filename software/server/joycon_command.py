@@ -94,16 +94,6 @@ class FixedAxesJoyconRobotics(JoyconRobotics):
         if button_servo3_down == 1:
             self.position[2] -= speed_scale * self.dof_speed[2] * self.direction_reverse[2]
 
-        joycon_button_home = self.joycon.get_button_home() if self.joycon.is_right() else self.joycon.get_button_capture()
-        if joycon_button_home == 1:
-            self.position = self.offset_position_m.copy()
-
-        for event_type, status in self.button.events():
-            if self.joycon.is_right() and event_type == "a":
-                self.next_episode_button = status
-            elif self.joycon.is_right() and event_type == "y":
-                self.restart_episode_button = status
-
         gripper_button_pressed = False
         if self.joycon.is_right():
             if not self.change_down_to_gripper:
@@ -126,15 +116,7 @@ class FixedAxesJoyconRobotics(JoyconRobotics):
             if self.gripper_min <= new_gripper_state <= self.gripper_max:
                 self.gripper_state = new_gripper_state
 
-        if self.joycon.is_right():
-            if self.next_episode_button == 1:
-                self.button_control = 1
-            elif self.restart_episode_button == 1:
-                self.button_control = -1
-            else:
-                self.button_control = 0
-
-        return self.position, self.gripper_state, self.button_control
+        return self.position, self.gripper_state, 0
 
 
 class JoyConCommand:
@@ -255,8 +237,8 @@ class JoyConCommand:
         self.robot_controller.base_controller.reset()
         try:
             while not self._stop_event.is_set():
-                pose_right, gripper_right, _control_button_right = self.joycon_right.get_control()
-                pose_left, gripper_left, _control_button_left = self.joycon_left.get_control()
+                pose_right, gripper_right, _ = self.joycon_right.get_control()
+                pose_left, gripper_left, _ = self.joycon_left.get_control()
 
                 if self._quit_buttons_pressed():
                     print("[JOYCON] Quit requested by Capture + Home.")
@@ -267,8 +249,8 @@ class JoyConCommand:
                 if self._handle_sleep_button():
                     continue
 
-                self.robot_controller.set_arm_end_effector_target("right", pose_right, gripper_right)
-                self.robot_controller.set_arm_end_effector_target("left", pose_left, gripper_left)
+                self.robot_controller.right_arm.set_end_effector_target(pose_right, gripper_right)
+                self.robot_controller.left_arm.set_end_effector_target(pose_left, gripper_left)
                 self._update_head_target()
                 self._update_base_speed_level()
                 directions = get_joycon_base_directions(self.joycon_left)
@@ -295,7 +277,7 @@ class JoyConCommand:
             head_motor_1_delta = -1
 
         if head_motor_1_delta or head_motor_2_delta:
-            self.robot_controller.increment_head_target(head_motor_1_delta, head_motor_2_delta)
+            self.robot_controller.head.increment_target(head_motor_1_delta, head_motor_2_delta)
 
     def _quit_buttons_pressed(self):
         return (

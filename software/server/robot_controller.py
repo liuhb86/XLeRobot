@@ -128,9 +128,6 @@ class RobotController:
             self._control_thread_error = None
             raise error
 
-    def is_control_loop_running(self):
-        return self._control_thread is not None and self._control_thread.is_alive()
-
     def set_quit_status(self, should_quit=True):
         with self._lock:
             self._quit_requested = should_quit
@@ -138,61 +135,6 @@ class RobotController:
     def get_quit_status(self):
         with self._lock:
             return self._quit_requested
-
-    @property
-    def config(self):
-        return self.robot.config
-
-    def set_arm_end_effector_target(self, prefix, pose, gripper_state):
-        with self._lock:
-            self._arm(prefix).set_end_effector_target(pose, gripper_state)
-
-    def set_arm_joint_targets(self, prefix, positions):
-        with self._lock:
-            arm = self._arm(prefix)
-            arm.target_positions.update(
-                {joint: value for joint, value in positions.items() if joint in arm.target_positions}
-            )
-
-    def set_head_targets(self, positions):
-        with self._lock:
-            self.head.target_positions.update(
-                {motor: value for motor, value in positions.items() if motor in self.head.target_positions}
-            )
-
-    def increment_head_target(self, head_motor_1_delta=0.0, head_motor_2_delta=0.0):
-        with self._lock:
-            self.head.increment_target(head_motor_1_delta, head_motor_2_delta)
-
-    def set_base_velocity_target(self, base_action):
-        self.base_controller.set_target(base_action)
-
-    def set_target_state(self, left_arm=None, right_arm=None, head=None, base=None):
-        if left_arm is not None:
-            self.set_arm_joint_targets("left", left_arm)
-        if right_arm is not None:
-            self.set_arm_joint_targets("right", right_arm)
-        if head is not None:
-            self.set_head_targets(head)
-        if base is not None:
-            self.set_base_velocity_target(base)
-
-    def get_target_state(self):
-        with self._lock:
-            return {
-                "left_arm": self.left_arm.target_positions.copy(),
-                "right_arm": self.right_arm.target_positions.copy(),
-                "head": self.head.target_positions.copy(),
-                "base": self.base_controller.get_target(),
-            }
-
-    def reset_targets_to_zero(self):
-        with self._lock:
-            print("[ROBOT] Reset target state to zero position.")
-            self.left_arm.set_zero_target()
-            self.right_arm.set_zero_target()
-            self.head.set_zero_target()
-            self.base_controller.reset()
 
     def set_recorded_targets(self, motor_states):
         with self._lock:
@@ -239,13 +181,6 @@ class RobotController:
             if self.log_rerun:
                 log_rerun_data(obs, action)
             precise_sleep(1.0 / self.fps)
-
-    def _arm(self, prefix):
-        if prefix == "left":
-            return self.left_arm
-        if prefix == "right":
-            return self.right_arm
-        raise ValueError(f"Unknown arm prefix: {prefix}")
 
     def _require_targets_initialized(self):
         if self.left_arm is None or self.right_arm is None or self.head is None:

@@ -40,6 +40,14 @@ class SimpleTeleopArm:
         }
         self.roll_baseline = None
         self.wrist_roll_anchor = self.target_positions["wrist_roll"]
+        self.position = [0.0, 0.0, 0.0]
+        self.dof_speed = [2, 2, 2, 1, 1, 1]
+
+        self.gripper_state = 1.0
+        self.gripper_speed = 0.4
+        self.gripper_min = 0
+        self.gripper_max = 90
+
 
     def set_zero_target(self):
         print(f"[{self.prefix}] Targeting zero position: {self.zero_pos}")
@@ -54,18 +62,33 @@ class SimpleTeleopArm:
         self.roll_baseline = None
         self.wrist_roll_anchor = self.target_positions["wrist_roll"]
 
-    def set_end_effector_target(self, pose, gripper_state):
+    def set_end_effector_target(self, orientation_rad, control_vector):
         """Set arm target from a generic end-effector pose tuple."""
-        x, y, z, roll_, pitch_, _yaw = pose
-        pitch = -pitch_ * 60 + 10
+        speed_scale = 0.001
+        _roll, pitch, _yaw = orientation_rad
+
+        def move_servo2(direction):
+            self.position[0] += speed_scale * direction * self.dof_speed[0] * math.cos(pitch)
+            self.position[2] += speed_scale * direction * self.dof_speed[1] * math.sin(pitch)
+
+        def move_y(direction):
+            self.position[1] += speed_scale * direction * self.dof_speed[1]
+
+        d1, d2, d3 = control_vector
+        move_y(d1)
+        move_servo2(d2)
+        self.position[2] += d3 * speed_scale * self.dof_speed[2]
+
+        x, y, z = self.position
+        pitch = -pitch * 60 + 10
         current_x = 0.1629 + x
         current_y = 0.1131 + z
 
         if self.roll_baseline is None:
-            self.roll_baseline = roll_
+            self.roll_baseline = roll
             self.wrist_roll_anchor = self.target_positions["wrist_roll"]
 
-        roll = self.wrist_roll_anchor + (roll_ - self.roll_baseline) * 45
+        roll = self.wrist_roll_anchor + (roll - self.roll_baseline) * 45
         self.target_positions["shoulder_pan"] = y * 250.0
 
         try:
@@ -79,6 +102,13 @@ class SimpleTeleopArm:
             -self.target_positions["shoulder_lift"] - self.target_positions["elbow_flex"] + pitch
         )
         self.target_positions["wrist_roll"] = roll
+        
+
+    def increment_gripper_target(self, delta):
+        new_gripper_state = self.gripper_state + delta * self.gripper_speed
+        new_gripper_state = max(new_gripper_state, self.gripper_min)
+        new_gripper_state = min(new_gripper_state, self.gripper_max)
+        self.gripper_state = new_gripper_state
         self.target_positions["gripper"] = gripper_state
 
     def p_control_action(self, obs):

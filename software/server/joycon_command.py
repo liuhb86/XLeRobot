@@ -52,9 +52,9 @@ class JoyConHalfCommand:
             pitch_down_double=False,
             lowpassfilter_alpha_rate=1,
         )
-        self.gripper_state = 1.0
-        self.position = [0.0, 0.0, 0.0]
-        self.dof_speed = [2, 2, 2, 1, 1, 1]
+
+        self.gripper_direction = 1
+        self.last_gripper_button_state = 0  
 
         if reset_device:
             self.reset_joycon()
@@ -65,12 +65,6 @@ class JoyConHalfCommand:
         else:
             self.joycon_stick_v_0 = 2300
             self.joycon_stick_h_0 = 2000
-
-        self.gripper_speed = 0.4
-        self.gripper_direction = 1
-        self.gripper_min = 0
-        self.gripper_max = 90
-        self.last_gripper_button_state = 0  
 
     def disconnect(self):
         self.joycon._close()
@@ -84,63 +78,68 @@ class JoyConHalfCommand:
         self.orientation_sensor.reset_yaw()
         print("\033[32mJoycon calibrations is complete.\033[0m")
 
-    def update(self):
-        speed_scale = 0.001
+    def update_orientation(self):
         orientation_rad = self.orientation_sensor.update(self.gyro.gyro_in_rad[0], self.gyro.accel_in_g[0])
-        _roll, pitch, _yaw = orientation_rad
+        return orientation_rad
 
-        def move_servo2(direction):
-            self.position[0] += speed_scale * direction * self.dof_speed[0] * math.cos(pitch)
-            self.position[2] += speed_scale * direction * self.dof_speed[1] * math.sin(pitch)
-
-        def move_y(direction):
-            self.position[1] += speed_scale * direction * self.dof_speed[1]
-
+    def get_control_vector(self):
         if self.joycon.is_right():
-            button_y_left = self.joycon.get_button_y()
-            button_a_right = self.joycon.get_button_a()
-            button_x_forward = self.joycon.get_button_x()
-            button_b_backward = self.joycon.get_button_b()
-            button_servo3_up = self.joycon.get_button_r()
-            button_servo3_down = self.joycon.get_button_plus()
+            button_left = self.joycon.get_button_y()
+            button_right = self.joycon.get_button_a()
+            button_up = self.joycon.get_button_x()
+            button_down = self.joycon.get_button_b()
+            button_sign = self.joycon.get_button_plus()
+            button_lr = self.joycon.get_button_r()
         else:
-            button_y_left = self.joycon.get_button_left()
-            button_a_right = self.joycon.get_button_right()
-            button_x_forward = self.joycon.get_button_up()
-            button_b_backward = self.joycon.get_button_down()
-            button_servo3_up = self.joycon.get_button_l()
-            button_servo3_down = self.joycon.get_button_minus()
+            button_left = self.joycon.get_button_left()
+            button_right = self.joycon.get_button_right()
+            button_up = self.joycon.get_button_up()
+            button_down = self.joycon.get_button_down()
+            button_sign = self.joycon.get_button_minus()
+            button_lr = self.joycon.get_button_l()
+            
+        control_vector = (button_right - button_left, button_up - button_down, button_sign - button_lr)
+        return control_vector
 
-        if button_y_left == 1:
-            move_y(-1)
-        if button_a_right == 1:
-            move_y(1)
-        if button_x_forward == 1:
-            move_servo2(1)
-        if button_b_backward == 1:
-            move_servo2(-1)
-        if button_servo3_up == 1:
-            self.position[2] += speed_scale * self.dof_speed[2]
-        if button_servo3_down == 1:
-            self.position[2] -= speed_scale * self.dof_speed[2]
-
-        gripper_button_pressed = False
+    def update_gripper(self):
         if self.joycon.is_right():
-            gripper_button_pressed = self.joycon.get_button_zr() == 1
+            button_gripper = self.joycon.get_button_zr()
         else:
-            gripper_button_pressed = self.joycon.get_button_zl() == 1
+            button_gripper = self.joycon.get_button_zl()
+        gripper_button_pressed = button_gripper == 1
 
-        if gripper_button_pressed and self.last_gripper_button_state == 0:
-            self.gripper_direction *= -1
-            print(f"[GRIPPER] Direction changed to: {'Open' if self.gripper_direction == 1 else 'Close'}")
-        self.last_gripper_button_state = gripper_button_pressed
-
+        gripper_action = 0;
         if gripper_button_pressed:
-            new_gripper_state = self.gripper_state + self.gripper_direction * self.gripper_speed
-            if self.gripper_min <= new_gripper_state <= self.gripper_max:
-                self.gripper_state = new_gripper_state
+            if self.last_gripper_button_state == 0:
+                self.gripper_direction *= -1
+                print(f"[GRIPPER] Direction changed to: {'Open' if self.gripper_direction == 1 else 'Close'}")
+            gripper_action = self.gripper_direction
 
-        return (self.position, orientation_rad, self.gripper_state)
+        self.last_gripper_button_state = gripper_button_pressed
+        return gripper_action
+
+    def get_joycon_stick_directions(self):
+        stick_vertical = self.joycon.get_stick_left_vertical()
+        stick_horizontal = self.joycon.get_stick_left_horizontal()
+        threshold = 300
+        v = 0
+        h = 0
+
+        if stick_vertical > self.joycon_stick_v_0 + threshold:
+            v = 1
+            print("[BASE] Forward")
+        elif stick_vertical < self.joycon_stick_v_0 - threshold:
+            v = -1
+            print("[BASE] Backward")
+
+        if stick_horizontal < self.joycon_stick_h_0 - threshold:
+            h = -1
+            print("[BASE] Left turn")
+        elif stick_horizontal > self.joycon_stick_h_0 + threshold:
+            h = 1
+            print("[BASE] Right turn")
+
+        return (v, h)    
 
 class JoyConCommand:
     """Routes Joy-Con thread updates into RobotController target state."""
@@ -168,8 +167,14 @@ class JoyConCommand:
         self.robot_controller = robot_controller
 
     def connect(self):
-        self.joycon_right, self.joycon_left = _initialize_joycons()
-
+        check_required_joycons_available()
+        print("[MAIN] Initializing right Joy-Con controller...")
+        self.joycon_right = JoyConHalfCommand("right")
+        print("[MAIN] Right Joy-Con controller connected")
+        print("[MAIN] Initializing left Joy-Con controller...")
+        self.joycon_left = JoyConHalfCommand("left")
+        print("[MAIN] Left Joy-Con controller connected")
+    
     def disconnect(self):
         stop_error = None
         try:
@@ -177,9 +182,12 @@ class JoyConCommand:
         except Exception as exc:
             stop_error = exc
         finally:
-            _disconnect_joycons(self.joycon_right, self.joycon_left)
-            self.joycon_right = None
-            self.joycon_left = None
+            if self.joycon_right is not None:
+                self.joycon_right.disconnect()
+                self.joycon_right = None
+            if self.joycon_left is not None:
+                self.joycon_left.disconnect()
+                self.joycon_left = None
 
         if stop_error is not None:
             raise stop_error
@@ -222,18 +230,24 @@ class JoyConCommand:
                     self._update_arm_target(self.joycon_left, self.robot_controller.left_arm)
                     self._update_arm_target(self.joycon_right, self.robot_controller.right_arm)
                     self._update_head_target()
-                    self._update_base_speed_level()
-                    directions = get_joycon_base_directions(self.joycon_left)
-                    self.robot_controller.base_controller.update(directions)
+                    self._update_base_target()
+                    
                 self._stop_event.wait(1.0 / self.fps)
         except Exception as exc:
             self._thread_error = exc
             self._stop_event.set()
 
     def _update_arm_target(self, joycon, arm_controller):
-        (position, orientation_rad, gripper_state) = joycon.update()
-        pose = [*position, *orientation_rad]
-        arm_controller.set_end_effector_target(pose, gripper_state)
+        orientation_rad = joycon.update_orientation()
+        control_vector = joycon.get_control_vector()
+        gripper_action = joycon.update_gripper()
+        arm_controller.set_end_effector_target(orientation_rad, control_vector)
+        arm_controller.increment_gripper_target(gripper_action)
+
+    def _update_base_target(self):
+        self._update_base_speed_level()
+        (v, h) = self.joycon_left.get_joycon_stick_directions()
+        self.robot_controller.base_controller.update_speed(v, h)
 
     def _update_base_speed_level(self):
         speed_down_pressed = self.joycon_left.joycon.get_button_left_sl() == 1
@@ -248,23 +262,8 @@ class JoyConCommand:
         self.last_speed_up_pressed = speed_up_pressed
 
     def _update_head_target(self):
-        stick_vertical = self.joycon_right.joycon.get_stick_right_vertical()
-        stick_horizontal = self.joycon_right.joycon.get_stick_right_horizontal()
-        threshold = 300
-        head_motor_1_delta = 0
-        head_motor_2_delta = 0
-
-        if stick_vertical > self.joycon_right.joycon_stick_v_0 + threshold:
-            head_motor_2_delta = -2
-        elif stick_vertical < self.joycon_right.joycon_stick_v_0 - threshold:
-            head_motor_2_delta = 2
-        if stick_horizontal < self.joycon_right.joycon_stick_h_0 - threshold:
-            head_motor_1_delta = 1
-        elif stick_horizontal > self.joycon_right.joycon_stick_h_0 + threshold:
-            head_motor_1_delta = -1
-
-        if head_motor_1_delta or head_motor_2_delta:
-            self.robot_controller.head.increment_target(head_motor_1_delta, head_motor_2_delta)
+        (v, h) = self.joycon_right.get_joycon_stick_directions()
+        self.robot_controller.head.increment_target(h, v)
 
     def _quit_buttons_pressed(self):
         if self.joycon_right.joycon.get_button_home() == 1 and self.joycon_left.joycon.get_button_capture() == 1:
@@ -319,43 +318,3 @@ class JoyConCommand:
                 print("[MAIN] Wake requested. Re-initializing teleoperation...")
                 return
             self._stop_event.wait(poll_interval_s)
-
-def get_joycon_base_directions(joycon):
-    stick_vertical = joycon.joycon.get_stick_left_vertical()
-    stick_horizontal = joycon.joycon.get_stick_left_horizontal()
-    threshold = 300
-    directions = 0
-
-    if stick_vertical > joycon.joycon_stick_v_0 + threshold:
-        directions |= BASE_FORWARD
-        print("[BASE] Forward")
-    elif stick_vertical < joycon.joycon_stick_v_0 - threshold:
-        directions |= BASE_BACKWARD
-        print("[BASE] Backward")
-
-    if stick_horizontal < joycon.joycon_stick_h_0 - threshold:
-        directions |= BASE_ROTATE_LEFT
-        print("[BASE] Left turn")
-    elif stick_horizontal > joycon.joycon_stick_h_0 + threshold:
-        directions |= BASE_ROTATE_RIGHT
-        print("[BASE] Right turn")
-
-    return directions
-
-
-def _initialize_joycons():
-    check_required_joycons_available()
-    print("[MAIN] Initializing right Joy-Con controller...")
-    joycon_right = JoyConHalfCommand("right")
-    print("[MAIN] Right Joy-Con controller connected")
-    print("[MAIN] Initializing left Joy-Con controller...")
-    joycon_left = JoyConHalfCommand("left")
-    print("[MAIN] Left Joy-Con controller connected")
-    return joycon_right, joycon_left
-
-
-def _disconnect_joycons(joycon_right, joycon_left):
-    if joycon_right is not None:
-        joycon_right.disconnect()
-    if joycon_left is not None:
-        joycon_left.disconnect()

@@ -13,11 +13,6 @@ BASE_SPEED_LEVELS = [
     {"linear": 0.4, "angular": 90},
 ]
 MIN_VELOCITY_THRESHOLD = 0.02
-BASE_FORWARD = 1 << 0
-BASE_BACKWARD = 1 << 1
-BASE_ROTATE_LEFT = 1 << 2
-BASE_ROTATE_RIGHT = 1 << 3
-
 
 class SmoothBaseController:
     """Smooth base velocity generator from requested base directions."""
@@ -68,7 +63,7 @@ class SmoothBaseController:
         level_index = min(self.speed_index, len(BASE_TOP_SPEED_LEVELS) - 1)
         return BASE_TOP_SPEED_LEVELS[level_index]
 
-    def update(self, directions):
+    def update_speed(self, linear_delta, rotation_delta):
         with self._lock:
             current_time = time.time()
             dt = current_time - self.last_time
@@ -76,7 +71,7 @@ class SmoothBaseController:
             max_speed_multiplier = self.max_speed_multiplier()
             self.current_speed = min(self.current_speed, max_speed_multiplier)
 
-            is_accelerating = directions != 0
+            is_accelerating = (linear_delta != 0 or rotaion_delta !=0)
             base_action = {"x.vel": 0.0, "theta.vel": 0.0}
 
             if is_accelerating:
@@ -85,14 +80,8 @@ class SmoothBaseController:
                     print("[BASE] Starting acceleration")
 
                 speed_setting = self.speed_levels[self.speed_index]
-                if directions & BASE_FORWARD:
-                    base_action["x.vel"] += speed_setting["linear"]
-                if directions & BASE_BACKWARD:
-                    base_action["x.vel"] -= speed_setting["linear"]
-                if directions & BASE_ROTATE_LEFT:
-                    base_action["theta.vel"] += speed_setting["angular"]
-                if directions & BASE_ROTATE_RIGHT:
-                    base_action["theta.vel"] -= speed_setting["angular"]
+                base_action["x.vel"] += linear_delta * speed_setting["linear"]
+                base_action["theta.vel"] += rotation_delta * speed_setting["angular"]
 
                 self.last_direction = base_action.copy()
                 self.current_speed = min(self.current_speed + BASE_ACCELERATION_RATE * dt, max_speed_multiplier)

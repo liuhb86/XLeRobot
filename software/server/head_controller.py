@@ -22,8 +22,8 @@ class SimpleHeadControl:
             motor: motor_states[f"{motor}.pos"] for motor in self.target_positions
         }
 
-    def increment_target(self, head_motor_1_delta=0.0, head_motor_2_delta=0.0):
-        self.target_positions["head_motor_1"] += head_motor_1_delta
+    def increment_target(self, head_motor_1_delta, head_motor_2_delta):
+        self.target_positions["head_motor_1"] += head_motor_1_delta * 2
         self.target_positions["head_motor_2"] += head_motor_2_delta
         if head_motor_1_delta:
             print(f"[HEAD] head_motor_1: {self.target_positions['head_motor_1']}")

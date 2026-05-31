@@ -1,3 +1,5 @@
+import math
+
 LEFT_JOINT_MAP = {
     "shoulder_pan": "left_arm_shoulder_pan",
     "shoulder_lift": "left_arm_shoulder_lift",
@@ -43,7 +45,6 @@ class SimpleTeleopArm:
         self.position = [0.0, 0.0, 0.0]
         self.dof_speed = [2, 2, 2, 1, 1, 1]
 
-        self.gripper_state = 1.0
         self.gripper_speed = 0.4
         self.gripper_min = 0
         self.gripper_max = 90
@@ -65,7 +66,7 @@ class SimpleTeleopArm:
     def set_end_effector_target(self, orientation_rad, control_vector):
         """Set arm target from a generic end-effector pose tuple."""
         speed_scale = 0.001
-        _roll, pitch, _yaw = orientation_rad
+        roll, pitch, _yaw = orientation_rad
 
         def move_servo2(direction):
             self.position[0] += speed_scale * direction * self.dof_speed[0] * math.cos(pitch)
@@ -105,11 +106,11 @@ class SimpleTeleopArm:
         
 
     def increment_gripper_target(self, delta):
-        new_gripper_state = self.gripper_state + delta * self.gripper_speed
+        new_gripper_state = self.target_positions["gripper"]
+        new_gripper_state = new_gripper_state + delta * self.gripper_speed
         new_gripper_state = max(new_gripper_state, self.gripper_min)
         new_gripper_state = min(new_gripper_state, self.gripper_max)
-        self.gripper_state = new_gripper_state
-        self.target_positions["gripper"] = gripper_state
+        self.target_positions["gripper"] = new_gripper_state
 
     def p_control_action(self, obs):
         action = {}

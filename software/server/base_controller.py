@@ -71,7 +71,7 @@ class SmoothBaseController:
             max_speed_multiplier = self.max_speed_multiplier()
             self.current_speed = min(self.current_speed, max_speed_multiplier)
 
-            is_accelerating = (linear_delta != 0 or rotaion_delta !=0)
+            is_accelerating = (linear_delta != 0 or rotation_delta !=0)
             base_action = {"x.vel": 0.0, "theta.vel": 0.0}
 
             if is_accelerating:

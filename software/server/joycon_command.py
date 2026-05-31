@@ -11,8 +11,6 @@ from joyconrobotics.gyro import GyroTrackingJoyCon
 from joyconrobotics.joycon import JoyCon
 from joyconrobotics.joyconrobotics import AttitudeEstimator
 
-from base_controller import BASE_BACKWARD, BASE_FORWARD, BASE_ROTATE_LEFT, BASE_ROTATE_RIGHT
-
 SLEEP_HOLD_SECONDS = 3.0
 ACTIVE_SOLVE_LOOP_SLEEP_SECONDS = 0.01
 ASLEEP_SOLVE_LOOP_SLEEP_SECONDS = 1.0
@@ -119,26 +117,24 @@ class JoyConHalfCommand:
         return gripper_action
 
     def get_joycon_stick_directions(self):
-        stick_vertical = self.joycon.get_stick_left_vertical()
-        stick_horizontal = self.joycon.get_stick_left_horizontal()
+        if self.joycon.is_right():
+            stick_vertical = self.joycon.get_stick_right_vertical()
+            stick_horizontal = self.joycon.get_stick_right_horizontal()
+        else:
+            stick_vertical = self.joycon.get_stick_left_vertical()
+            stick_horizontal = self.joycon.get_stick_left_horizontal()
         threshold = 300
         v = 0
         h = 0
 
         if stick_vertical > self.joycon_stick_v_0 + threshold:
             v = 1
-            print("[BASE] Forward")
         elif stick_vertical < self.joycon_stick_v_0 - threshold:
             v = -1
-            print("[BASE] Backward")
-
         if stick_horizontal < self.joycon_stick_h_0 - threshold:
             h = -1
-            print("[BASE] Left turn")
         elif stick_horizontal > self.joycon_stick_h_0 + threshold:
             h = 1
-            print("[BASE] Right turn")
-
         return (v, h)    
 
 class JoyConCommand:

@@ -3,9 +3,10 @@
 
 import argparse
 import json
-import os
 from pathlib import Path
 
+
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 ARM_JOINTS = (
     "shoulder_pan",
@@ -18,9 +19,7 @@ ARM_JOINTS = (
 
 
 def default_calibration_root():
-    hf_home = Path(os.getenv("HF_HOME", "~/.cache/huggingface")).expanduser()
-    hf_lerobot_home = Path(os.getenv("HF_LEROBOT_HOME", hf_home / "lerobot")).expanduser()
-    return Path(os.getenv("HF_LEROBOT_CALIBRATION", hf_lerobot_home / "calibration")).expanduser()
+    return SCRIPT_DIR.parent / "config" / "calibration"
 
 
 def parse_args():
@@ -31,7 +30,7 @@ def parse_args():
         "--calibration-root",
         type=Path,
         default=default_calibration_root(),
-        help="LeRobot calibration root. Defaults to $HF_LEROBOT_CALIBRATION or ~/.cache/huggingface/lerobot/calibration.",
+        help="LeRobot calibration root. Defaults to ../config/calibration relative to this script.",
     )
     parser.add_argument(
         "--source-id",

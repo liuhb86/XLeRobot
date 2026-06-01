@@ -9,5 +9,11 @@
     "right": {
         "port": "/dev/ttyACM1",
         "robot-id": "xlerobot_right"
+    },
+    "leader-arms" : {
+        "right": {
+            "port": "/dev/ttyACM2",
+            "robot-id": "so101_leader"
+        }
     }
 }

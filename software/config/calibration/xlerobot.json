@@ -93,9 +93,9 @@
     "right_arm_gripper": {
         "id": 6,
         "drive_mode": 0,
-        "homing_offset": 1969,
-        "range_min": 2043,
-        "range_max": 3489
+        "homing_offset": 1937,
+        "range_min": 2032,
+        "range_max": 3503
     },
     "base_left_wheel": {
         "id": 9,

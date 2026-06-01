@@ -51,16 +51,27 @@ def parse_args():
 
 
 def resolve_source_path(calibration_root, source_id):
-    source_dir = calibration_root / "robots" / "xlerobot_2wheels"
+    source_dirs = (
+        calibration_root,
+        calibration_root / "robots" / "xlerobot_2wheels",
+    )
     if source_id:
-        return source_dir / f"{source_id}.json"
+        for source_dir in source_dirs:
+            source_path = source_dir / f"{source_id}.json"
+            if source_path.is_file():
+                return source_path
+        searched = ", ".join(str(source_dir / f"{source_id}.json") for source_dir in source_dirs)
+        raise FileNotFoundError(f"No xlerobot_2wheels calibration file found. Searched: {searched}")
 
-    candidates = sorted(source_dir.glob("*.json"))
+    candidates = []
+    for source_dir in source_dirs:
+        candidates.extend(sorted(source_dir.glob("*.json")))
     if len(candidates) == 1:
         return candidates[0]
     if not candidates:
-        raise FileNotFoundError(f"No xlerobot_2wheels calibration files found in {source_dir}")
-    candidate_names = ", ".join(path.stem for path in candidates)
+        searched = ", ".join(str(source_dir) for source_dir in source_dirs)
+        raise FileNotFoundError(f"No xlerobot_2wheels calibration files found in: {searched}")
+    candidate_names = ", ".join(str(path) for path in candidates)
     raise ValueError(f"Multiple xlerobot_2wheels calibration files found. Use --source-id. Available: {candidate_names}")
 
 
